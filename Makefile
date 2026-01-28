@@ -19,6 +19,12 @@ OBJS := \
   $(BUILDDIR)/printf.o \
   $(BUILDDIR)/command.o \
   $(BUILDDIR)/filesystem.o \
+  $(BUILDDIR)/ramdisk.o \
+  $(BUILDDIR)/ext2.o \
+  $(BUILDDIR)/ext2_img.o \
+  $(BUILDDIR)/mouse.o \
+  $(BUILDDIR)/gui.o \
+  $(BUILDDIR)/hzlib.o \
   $(BUILDDIR)/gdt.o \
   $(BUILDDIR)/gdt_flush.o \
   $(BUILDDIR)/idt.o \
@@ -72,6 +78,21 @@ $(BUILDDIR)/command.o: $(SRCDIR)/command.c | $(BUILDDIR)
 $(BUILDDIR)/filesystem.o: $(SRCDIR)/filesystem.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILDDIR)/ramdisk.o: $(SRCDIR)/ramdisk.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/ext2.o: $(SRCDIR)/ext2.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Embed ext2.img as a binary blob linked into the kernel.
+$(BUILDDIR)/ext2_img.o: ext2.img | $(BUILDDIR)
+	objcopy -I binary -O elf32-i386 -B i386 ext2.img $@
+
+# Create a tiny ext2 image on the host (Linux/WSL) if missing.
+ext2.img:
+	dd if=/dev/zero of=ext2.img bs=1024 count=2048
+	mkfs.ext2 -F ext2.img
+
 $(BUILDDIR)/gdt.o: $(SRCDIR)/gdt.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -88,6 +109,15 @@ $(BUILDDIR)/isr_stub.o: $(SRCDIR)/isr_stub.s | $(BUILDDIR)
 	$(CC) $(CFLAGS_ARCH) -c $< -o $@
 
 $(BUILDDIR)/keyboard.o: $(SRCDIR)/keyboard.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/mouse.o: $(SRCDIR)/mouse.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/gui.o: $(SRCDIR)/gui.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/hzlib.o: $(SRCDIR)/hzlib.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 iso: $(ISO)

@@ -2,11 +2,11 @@
 #include "terminal.h"
 #include "printf.h"
 
-/* Simple static in-memory filesystem tree */
+/* Simple static in-memory filesystem tree + trivial cwd tracking */
 
 static const char README_CONTENT[] =
     "Welcome to hzOS in-memory FS.\n"
-    "Try commands: help, list, list /etc, cat /etc/motd\n";
+    "Try commands: help, lf, lf /etc, cat /etc/motd, pwd, cd /etc\n";
 
 static const char MOTD_CONTENT[] =
     "hzOS Message of the Day:\n"
@@ -27,6 +27,9 @@ static const fs_node_t fs_root = {
     .content_len = 0
 };
 
+static const fs_node_t* fs_cwd = &fs_root;
+static char fs_cwd_path[64] = "/";
+
 static const fs_node_t fs_root_children[] = {
     { "readme.txt", FS_NODE_FILE, 0, 0, README_CONTENT, sizeof(README_CONTENT) - 1 },
     { "bin",        FS_NODE_DIR,  0, 0, 0, 0 },
@@ -39,7 +42,10 @@ static const fs_node_t fs_etc_children[] = {
 };
 
 void fs_init(void) {
-    /* currently nothing dynamic to initialize */
+    /* currently nothing dynamic beyond initial cwd */
+    fs_cwd = &fs_root;
+    fs_cwd_path[0] = '/';
+    fs_cwd_path[1] = '\0';
     kprintf("fs: in-memory FS initialized\n");
 }
 
@@ -136,5 +142,48 @@ const char* fs_read(const char* path, size_t* out_len) {
         *out_len = node->content_len;
     }
     return node->content;
+}
+
+int fs_chdir(const char* path) {
+    if (!path || !*path) {
+        return 0;
+    }
+
+    /* Support absolute paths directly, and simple single-component relative
+       paths from root (e.g. "etc" -> "/etc") for this tiny FS. */
+    char tmp[64];
+    const char* use = path;
+
+    if (path[0] != '/') {
+        tmp[0] = '/';
+        size_t i = 0;
+        while (path[i] && i + 1 < sizeof(tmp) - 1) {
+            tmp[i + 1] = path[i];
+            i++;
+        }
+        tmp[i + 1] = '\0';
+        use = tmp;
+    }
+
+    const fs_node_t* node = fs_find(use);
+    if (!node || node->type != FS_NODE_DIR) {
+        return -1;
+    }
+
+    fs_cwd = node;
+
+    /* Store the path we resolved (limited to our small tree). */
+    size_t i = 0;
+    while (use[i] && i < sizeof(fs_cwd_path) - 1) {
+        fs_cwd_path[i] = use[i];
+        i++;
+    }
+    fs_cwd_path[i] = '\0';
+
+    return 0;
+}
+
+const char* fs_get_cwd(void) {
+    return fs_cwd_path;
 }
 

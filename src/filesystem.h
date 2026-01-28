@@ -22,5 +22,7 @@ const fs_node_t* fs_get_root(void);
 const fs_node_t* fs_find(const char* path);
 void fs_list(const char* path);
 const char* fs_read(const char* path, size_t* out_len);
+int fs_chdir(const char* path);
+const char* fs_get_cwd(void);
 
 #endif

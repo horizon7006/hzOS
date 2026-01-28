@@ -2,6 +2,8 @@
 #include "terminal.h"
 #include "printf.h"
 #include "filesystem.h"
+#include "ext2.h"
+#include "gui.h"
 
 typedef struct {
     const char* name;
@@ -14,13 +16,25 @@ static void cmd_clear(const char* args);
 static void cmd_about(const char* args);
 static void cmd_lf(const char* args);
 static void cmd_cat(const char* args);
+static void cmd_pwd(const char* args);
+static void cmd_cd(const char* args);
+static void cmd_ext2_mount(const char* args);
+static void cmd_ext2_info(const char* args);
+static void cmd_ext2_lsroot(const char* args);
+static void cmd_gui(const char* args);
 
 static command_entry_t commands[] = {
-    { "help",  "Show available commands",      cmd_help  },
-    { "clear", "Clear the screen",             cmd_clear },
-    { "about", "Show information about hzOS",  cmd_about },
-    { "list",    "List directory contents",      cmd_lf    },
-    { "cat",   "Print file contents",          cmd_cat   },
+    { "help",        "Show available commands",       cmd_help        },
+    { "clear",       "Clear the screen",              cmd_clear       },
+    { "about",       "Show information about hzOS",   cmd_about       },
+    { "lf",          "List directory contents",       cmd_lf          },
+    { "cat",         "Print file contents",           cmd_cat         },
+    { "pwd",         "Print current directory",       cmd_pwd         },
+    { "cd",          "Change current directory",      cmd_cd          },
+    { "ext2mount",  "Mount ext2 from ramdisk",       cmd_ext2_mount  },
+    { "ext2info",   "Show ext2 superblock summary",  cmd_ext2_info   },
+    { "ext2lsroot", "List root dir of ext2 volume",  cmd_ext2_lsroot },
+    { "gui",        "Start simple text-mode GUI",    cmd_gui        },
 };
 
 static const size_t command_count = sizeof(commands) / sizeof(commands[0]);
@@ -140,5 +154,56 @@ static void cmd_cat(const char* args) {
         terminal_putc(data[i]);
     }
     terminal_putc('\n');
+}
+
+static void cmd_pwd(const char* args) {
+    (void)args;
+    kprintf("%s\n", fs_get_cwd());
+}
+
+static void cmd_cd(const char* args) {
+    const char* path = args;
+    if (!path) {
+        kprintf("cd: path required\n");
+        return;
+    }
+
+    while (*path == ' ' || *path == '\t') {
+        path++;
+    }
+
+    if (*path == '\0') {
+        kprintf("cd: path required\n");
+        return;
+    }
+
+    if (fs_chdir(path) != 0) {
+        kprintf("cd: cannot cd to %s\n", path);
+        return;
+    }
+
+    kprintf("cwd: %s\n", fs_get_cwd());
+}
+
+static void cmd_ext2_mount(const char* args) {
+    (void)args;
+    if (ext2_mount_from_ramdisk() != 0) {
+        kprintf("ext2mount: failed (no ramdisk or not ext2)\n");
+    }
+}
+
+static void cmd_ext2_info(const char* args) {
+    (void)args;
+    ext2_print_super();
+}
+
+static void cmd_ext2_lsroot(const char* args) {
+    (void)args;
+    ext2_list_root();
+}
+
+static void cmd_gui(const char* args) {
+    (void)args;
+    gui_start();
 }
 
