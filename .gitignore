@@ -1,0 +1,9 @@
+.vscode/
+build/
+iso/
+*.o
+*.elf
+*.iso
+*.bin
+*.img
+*.raw
