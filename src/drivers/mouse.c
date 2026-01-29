@@ -6,10 +6,17 @@
 /* Basic PS/2 mouse driver: decodes 3-byte packets from IRQ12. */
 
 static mouse_state_t state = {40, 12, 0, 0, 0};
+static int max_x = 79;
+static int max_y = 24;
 
 static uint8_t packet[3];
 static int packet_index = 0;
 static int mouse_initialized = 0;
+
+void mouse_set_bounds(int width, int height) {
+    max_x = width - 1;
+    max_y = height - 1;
+}
 
 static void mouse_write(uint8_t value) {
     /* Wait for controller to be ready for command */
@@ -42,8 +49,8 @@ static void mouse_irq_handler(struct registers* regs) {
 
     if (state.x < 0) state.x = 0;
     if (state.y < 0) state.y = 0;
-    if (state.x > 79) state.x = 79;
-    if (state.y > 24) state.y = 24;
+    if (state.x > max_x) state.x = max_x;
+    if (state.y > max_y) state.y = max_y;
 
     state.left_down   = packet[0] & 0x1;
     state.right_down  = packet[0] & 0x2;

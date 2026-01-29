@@ -21,6 +21,15 @@ static char input_buffer[KEYBOARD_BUFFER_SIZE];
 static int input_len = 0;
 
 static void keyboard_handle_command(void);
+/* External hook for GUI */
+void wm_handle_key(char c);
+
+// Callback pointer
+static void (*g_kb_callback)(char) = 0;
+
+void keyboard_set_callback(void (*cb)(char)) {
+    g_kb_callback = cb;
+}
 
 static void keyboard_irq_handler(struct registers* regs) {
     UNUSED(regs);
@@ -32,6 +41,18 @@ static void keyboard_irq_handler(struct registers* regs) {
 
     char c = keymap[scancode];
     if (!c) return;
+
+    if (g_kb_callback) {
+        g_kb_callback(c);
+        // If we consume it, return? 
+        // Or if we want shell echo logic inside driver (bad)?
+        // Driver currently has shell echo logic!
+        // If callback is set, we skip driver's built-in shell logic (echo, buffer).
+        return; 
+    }
+
+    /* Hook for GUI */
+    wm_handle_key(c);
 
     if (c == '\n') {
         terminal_putc('\n');

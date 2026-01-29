@@ -6,7 +6,7 @@ static const int VGA_HEIGHT = 25;
 
 static int terminal_row = 0;
 static int terminal_column = 0;
-static uint8_t terminal_color = 0x0F; // white on black
+static uint8_t terminal_color = 0x0F; 
 
 static inline uint16_t vga_entry(char c, uint8_t color) {
     return ((uint16_t)color << 8) | (uint8_t)c;
@@ -17,13 +17,11 @@ static void terminal_put_at(char c, int x, int y) {
 }
 
 static void terminal_scroll(void) {
-    // scroll everything up by one line
     for (int y = 1; y < VGA_HEIGHT; y++) {
         for (int x = 0; x < VGA_WIDTH; x++) {
             VIDEO_MEMORY[(y - 1) * VGA_WIDTH + x] = VIDEO_MEMORY[y * VGA_WIDTH + x];
         }
     }
-    // clear last line
     for (int x = 0; x < VGA_WIDTH; x++) {
         VIDEO_MEMORY[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = vga_entry(' ', terminal_color);
     }
@@ -51,7 +49,18 @@ void terminal_init(void) {
     terminal_clear();
 }
 
+static term_sink_t terminal_sink = 0;
+
+void terminal_set_sink(term_sink_t sink) {
+    terminal_sink = sink;
+}
+
 void terminal_putc(char c) {
+    if (terminal_sink) {
+        terminal_sink(c);
+        return;
+    }
+
     if (c == '\n') {
         terminal_column = 0;
         terminal_row++;
@@ -64,7 +73,6 @@ void terminal_putc(char c) {
             terminal_row--;
             terminal_column = VGA_WIDTH - 1;
         }
-        // erase the character at the new cursor position
         terminal_put_at(' ', terminal_column, terminal_row);
     } else {
         terminal_put_at(c, terminal_column, terminal_row);

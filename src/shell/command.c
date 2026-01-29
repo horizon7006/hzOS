@@ -4,6 +4,7 @@
 #include "filesystem.h"
 #include "ext2.h"
 #include "gui.h"
+#include "../core/io.h"
 
 typedef struct {
     const char* name;
@@ -22,6 +23,8 @@ static void cmd_ext2_mount(const char* args);
 static void cmd_ext2_info(const char* args);
 static void cmd_ext2_lsroot(const char* args);
 static void cmd_gui(const char* args);
+static void cmd_reboot(const char* args);
+static void cmd_shutdown(const char* args);
 
 static command_entry_t commands[] = {
     { "help",        "Show available commands",       cmd_help        },
@@ -35,6 +38,8 @@ static command_entry_t commands[] = {
     { "ext2info",   "Show ext2 superblock summary",  cmd_ext2_info   },
     { "ext2lsroot", "List root dir of ext2 volume",  cmd_ext2_lsroot },
     { "gui",        "Start simple text-mode GUI",    cmd_gui        },
+    { "reboot",     "Reboot the system",             cmd_reboot      },
+    { "shutdown",   "Shutdown the system",           cmd_shutdown    },
 };
 
 static const size_t command_count = sizeof(commands) / sizeof(commands[0]);
@@ -207,3 +212,30 @@ static void cmd_gui(const char* args) {
     gui_start();
 }
 
+static void cmd_reboot(const char* args) {
+    (void)args;
+    terminal_writeln("Rebooting...");
+    
+    // Pulse CPU Reset line via 8042 Keyboard Controller
+    uint8_t good = 0x02;
+    while (good & 0x02) {
+        good = inb(0x64);
+    }
+    outb(0x64, 0xFE);
+    
+    // Halt if fail
+    asm volatile("hlt");
+}
+
+static void cmd_shutdown(const char* args) {
+    (void)args;
+    terminal_writeln("Shutting down...");
+    
+    // QEMU Shutdown (Magic Port)
+    outw(0x604, 0x2000); // Newer QEMU
+    outw(0xB004, 0x2000); // Older QEMU/Bochs
+    
+    terminal_writeln("It is now safe to turn off your computer.");
+    asm volatile("cli");
+    while(1) asm volatile("hlt");
+}
