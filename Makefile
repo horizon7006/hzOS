@@ -1,7 +1,3 @@
-# TOOLCHAIN selection:
-#   Native 32-bit: make TOOLCHAIN=native    (default)
-#   Cross i686-elf: make TOOLCHAIN=cross
-
 TOOLCHAIN ?= native
 
 SRCDIR   := src
@@ -70,19 +66,6 @@ OBJS := \
   $(BUILDDIR)/tcp.o \
   $(BUILDDIR)/paging.o \
   $(BUILDDIR)/timer.o
-
-# Toolchain configuration
-ifeq ($(TOOLCHAIN),cross)
-  CC := i686-elf-gcc
-  LD := i686-elf-ld
-  CFLAGS_ARCH :=
-  LDFLAGS_ARCH :=
-else
-  CC := gcc
-  LD := ld
-  CFLAGS_ARCH := -m64 -mcmodel=kernel -mno-red-zone
-  LDFLAGS_ARCH := -m elf_x86_64 -z max-page-size=0x1000
-endif
 
 CFLAGS := -std=gnu99 -ffreestanding -O2 -Wall -Wextra -g -fno-pic -fno-pie -fno-stack-protector -mno-sse -mno-mmx -mno-80387 $(CFLAGS_ARCH) $(INCLUDE_FLAGS)
 LDFLAGS := -nostdlib -T linker.ld $(LDFLAGS_ARCH)
