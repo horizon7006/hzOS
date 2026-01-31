@@ -27,9 +27,12 @@
 _start:
     cli
     mov $stack_top, %esp
-    push %ebx  /* Multiboot info structure address */
-    push %eax  /* Multiboot magic value */
-    call kernel_main
+    /* Save Multiboot info */
+    mov %eax, multiboot_magic
+    mov %ebx, multiboot_info_ptr
+    
+    /* Jump to Long Mode Trampoline */
+    call long_mode_start
 
 .hang:
     cli
@@ -41,3 +44,10 @@ _start:
 stack_bottom:
     .skip 16384
 stack_top:
+
+    .global multiboot_magic
+    .global multiboot_info_ptr
+multiboot_magic:
+    .long 0
+multiboot_info_ptr:
+    .long 0

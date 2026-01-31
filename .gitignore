@@ -8,3 +8,6 @@ iso/
 *.bin
 *.img
 *.raw
+*.log
+*.txt
+*.prog

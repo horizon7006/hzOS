@@ -14,6 +14,7 @@ typedef struct {
 void mouse_init(void);
 mouse_state_t mouse_get_state(void);
 void mouse_set_bounds(int width, int height);
+void mouse_reset_position(int x, int y);
 
 #endif
 

@@ -32,8 +32,13 @@ int ext2_mount_from_ramdisk(void) {
     }
 
     block_size = 1024U << super.s_log_block_size;
-    kprintf("ext2: mounted ramdisk: block_size=%u, inodes=%u, blocks=%u\n",
+    
+    // If s_inode_size is 0 (old ext2), default to 128
+    if (super.s_inode_size == 0) super.s_inode_size = 128;
+
+    kprintf("ext2: mounted ramdisk: block_size=%u, inode_size=%u, inodes=%u, blocks=%u\n",
             (unsigned)block_size,
+            (unsigned)super.s_inode_size,
             (unsigned)super.s_inodes_count,
             (unsigned)super.s_blocks_count);
     return 0;
@@ -50,6 +55,130 @@ void ext2_print_super(void) {
             (unsigned)super.s_blocks_count,
             (unsigned)super.s_free_blocks_count,
             (unsigned)super.s_free_inodes_count);
+}
+
+/* Read inode by number (1-indexed) */
+static int read_inode(uint32_t inode_num, ext2_inode_t* out) {
+    if (block_size == 0 || inode_num == 0) return -1;
+    
+    ext2_group_desc_t gd;
+    uint32_t gd_block = (block_size == 1024) ? 2 : 1;
+    
+    if (read_block(gd_block, &gd) != 0) return -1;
+    
+    uint32_t inode_size = super.s_inode_size;
+    uint32_t inode_index = inode_num - 1;
+    uint32_t inode_offset = inode_index * inode_size;
+    uint32_t inode_block = gd.bg_inode_table + (inode_offset / block_size);
+    uint32_t inode_block_offset = inode_offset % block_size;
+    
+    uint8_t buf[4096];
+    if (read_block(inode_block, buf) != 0) return -1;
+    
+    ext2_inode_t* inode_ptr = (ext2_inode_t*)(buf + inode_block_offset);
+    *out = *inode_ptr;
+    return 0;
+}
+
+/* Read file content from inode */
+int ext2_read_file(uint32_t inode_num, void* buffer, uint32_t size) {
+    ext2_inode_t inode;
+    if (read_inode(inode_num, &inode) != 0) return -1;
+    
+    if (inode.i_mode & 0x4000) return -1; // Directory, not a file
+    
+    uint32_t file_size = inode.i_size;
+    if (size > file_size) size = file_size;
+    
+    uint8_t* out = (uint8_t*)buffer;
+    uint32_t bytes_read = 0;
+    uint32_t block_buf[1024]; // For indirect blocks
+    
+    for (uint32_t i = 0; i < 15 && bytes_read < size; i++) {
+        uint32_t block_num = inode.i_block[i];
+        if (block_num == 0) break;
+        
+        if (i < 12) {
+            // Direct block
+            uint8_t block_data[4096];
+            if (read_block(block_num, block_data) != 0) return -1;
+            
+            uint32_t to_copy = size - bytes_read;
+            if (to_copy > block_size) to_copy = block_size;
+            
+            for (uint32_t j = 0; j < to_copy; j++) {
+                out[bytes_read++] = block_data[j];
+            }
+        }
+        // TODO: Handle indirect blocks (i==12, 13, 14) if needed
+    }
+    
+    return bytes_read;
+}
+
+/* Find inode number by path */
+int ext2_find_inode(const char* path) {
+    if (!path || path[0] != '/') return -1;
+    if (block_size == 0) return -1;
+    
+    // Start from root (inode 2)
+    uint32_t current_inode = 2;
+    
+    if (path[1] == '\0') return 2; // Root itself
+    
+    const char* p = path + 1; // Skip leading /
+    char component[256];
+    
+    while (*p) {
+        // Extract next path component
+        int i = 0;
+        while (*p && *p != '/' && i < 255) {
+            component[i++] = *p++;
+        }
+        component[i] = '\0';
+        
+        if (*p == '/') p++; // Skip /
+        
+        // Search current directory for component
+        ext2_inode_t dir_inode;
+        if (read_inode(current_inode, &dir_inode) != 0) return -1;
+        
+        if (!(dir_inode.i_mode & 0x4000)) return -1; // Not a directory
+        
+        uint32_t dir_block = dir_inode.i_block[0];
+        if (dir_block == 0) return -1;
+        
+        uint8_t buf[4096];
+        if (read_block(dir_block, buf) != 0) return -1;
+        
+        int found = 0;
+        uint32_t offset = 0;
+        while (offset < block_size) {
+            ext2_dir_entry_t* de = (ext2_dir_entry_t*)(buf + offset);
+            if (de->inode == 0 || de->rec_len == 0) break;
+            
+            // Compare name
+            if (de->name_len == i) {
+                int match = 1;
+                for (int j = 0; j < i; j++) {
+                    if (de->name[j] != component[j]) {
+                        match = 0;
+                        break;
+                    }
+                }
+                if (match) {
+                    current_inode = de->inode;
+                    found = 1;
+                    break;
+                }
+            }
+            offset += de->rec_len;
+        }
+        
+        if (!found) return -1;
+    }
+    
+    return current_inode;
 }
 
 void ext2_list_root(void) {
@@ -75,7 +204,7 @@ void ext2_list_root(void) {
         return;
     }
 
-    uint32_t inode_size = 128; /* assumption; adjust for s_inode_size if needed */
+    uint32_t inode_size = super.s_inode_size; /* dynamic from superblock */
     uint32_t inode_table_block = gd.bg_inode_table;
 
     /* inode 2 is root directory */
@@ -134,4 +263,5 @@ void ext2_list_root(void) {
         offset += de->rec_len;
     }
 }
+
 

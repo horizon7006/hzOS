@@ -13,6 +13,7 @@ void terminal_setcolor(uint8_t color);
 void terminal_putc(char c);
 void terminal_write(const char* str);
 void terminal_writeln(const char* str);
+int  terminal_get_char(void);
 
 void terminal_set_sink(term_sink_t sink);
 

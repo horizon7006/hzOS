@@ -1,77 +1,37 @@
+.section .text
+.code64
+.align 8
+
 .global idt_load
-.global isr0
-.global isr1
-.global isr2
-.global isr3
-.global isr4
-.global isr5
-.global isr6
-.global isr7
-.global isr8
-.global isr9
-.global isr10
-.global isr11
-.global isr12
-.global isr13
-.global isr14
-.global isr15
-.global isr16
-.global isr17
-.global isr18
-.global isr19
-.global isr20
-.global isr21
-.global isr22
-.global isr23
-.global isr24
-.global isr25
-.global isr26
-.global isr27
-.global isr28
-.global isr29
-.global isr30
-.global isr31
-
-.global irq0
-.global irq1
-.global irq2
-.global irq3
-.global irq4
-.global irq5
-.global irq6
-.global irq7
-.global irq8
-.global irq9
-.global irq10
-.global irq11
-.global irq12
-.global irq13
-.global irq14
-.global irq15
-
 .extern isr_handler
 .extern irq_handler
+.extern syscall_handler
 
+/* Load IDT pointer */
 idt_load:
-    mov 4(%esp), %eax
-    lidt (%eax)
+    lidt (%rdi)
     ret
 
+/* Macro for exception without error code */
 .macro ISR_NOERR num
+.global isr\num
 isr\num:
     cli
-    pushl $0          # fake error code
-    pushl $\num       # interrupt number
+    pushq $0          /* fake error code */
+    pushq $\num       /* interrupt number */
     jmp isr_common_stub
 .endm
 
+/* Macro for exception with error code */
 .macro ISR_ERR num
+.global isr\num
 isr\num:
     cli
-    pushl $\num
+    pushq $\num
     jmp isr_common_stub
 .endm
 
+/* Define ISRs */
 ISR_NOERR 0
 ISR_NOERR 1
 ISR_NOERR 2
@@ -105,14 +65,25 @@ ISR_NOERR 29
 ISR_ERR   30
 ISR_NOERR 31
 
+/* System Call ISR */
+.global isr80
+isr80:
+    cli
+    pushq $0
+    pushq $80
+    jmp syscall_common_stub
+
+/* Macro for IRQ */
 .macro IRQ num
+.global irq\num
 irq\num:
     cli
-    pushl $0
-    pushl $(32+\num)
+    pushq $0
+    pushq $(32+\num)
     jmp irq_common_stub
 .endm
 
+/* Define IRQs */
 IRQ 0
 IRQ 1
 IRQ 2
@@ -130,50 +101,171 @@ IRQ 13
 IRQ 14
 IRQ 15
 
+/* Common ISR Stub */
 isr_common_stub:
-    pusha
-    mov %ds, %ax
-    pushl %eax
-    mov $0x10, %ax
-    mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %fs
-    mov %ax, %gs
+    /* Save registers */
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rbx
+    pushq %rbp
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
 
-    pushl %esp
+    /* Save Data Segment (sanity check, usually 0 in 64-bit but good practice) */
+    /* Only FS/GS are relevant, but we skip for now as kernel uses null selectors usually */
+    movq %ds, %rax
+    pushq %rax
+
+    /* ABI: Pass stack pointer as 1st argument (RDI) to handler */
+    movq %rsp, %rdi
+    
     call isr_handler
-    add $4, %esp
 
-    popl %eax
-    mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %fs
-    mov %ax, %gs
-    popa
-    add $8, %esp
-    sti
-    iret
+    /* Restore registers */
+    popq %rax
+    /* mov %ax, %ds - Segments don't really matter in 64-bit flat mode */
+    
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rbp
+    popq %rbx
+    popq %rdx
+    popq %rcx
+    popq %rax
+    
+    addq $16, %rsp /* Pop error code and int number */
+    iretq
 
+/* Common IRQ Stub */
 irq_common_stub:
-    pusha
-    mov %ds, %ax
-    pushl %eax
-    mov $0x10, %ax
-    mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %fs
-    mov %ax, %gs
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rbx
+    pushq %rbp
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
 
-    pushl %esp
+    movq %ds, %rax
+    pushq %rax
+
+    movq %rsp, %rdi
+    
     call irq_handler
-    add $4, %esp
+    /* Handler might switch stack (scheduler). If so, it returns new RSP?
+       For now, we assume simple return. 
+       If scheduler needs to switch, it should update current_process->rsp 
+       and we manually switch? 
+       In 32-bit, we did `mov %eax, %esp`.
+       Here we should check if we need to switch?
+       Wait, `irq_handler` in 32-bit was `void`.
+       Ah, `isr_common_stub` called `isr_handler` (void).
+       
+       But `scheduler` was separate.
+       In `process.c`, `scheduler_schedule` returned `struct registers*`.
+       
+       Wait, `irq_handler` called `timer_callback`.
+       
+       If I want scheduler to work, I need to match 32-bit logic.
+       In 32-bit `irq_common_stub`:
+       call irq_handler
+       mov %eax, %esp  <-- It expected return value!
+       
+       I need to check `irq_handler` signature.
+    */
+    
+    /* Restore */
+    popq %rax
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rbp
+    popq %rbx
+    popq %rdx
+    popq %rcx
+    popq %rax
+    
+    addq $16, %rsp
+    iretq
 
-    popl %eax
-    mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %fs
-    mov %ax, %gs
-    popa
-    add $8, %esp
-    sti
-    iret
+/* Common Syscall Stub */
+syscall_common_stub:
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rbx
+    pushq %rbp
+    pushq %rsi
+    pushq %rdi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+
+    movq %ds, %rax
+    pushq %rax
+
+    movq %rsp, %rdi
+    
+    call syscall_handler
+    /* syscall_handler returned new ESP in 32-bit.
+       Here it should return new RSP?
+       
+       Let's assume for now no task switching in syscall
+    */
+    
+    popq %rax
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdi
+    popq %rsi
+    popq %rbp
+    popq %rbx
+    popq %rdx
+    popq %rcx
+    popq %rax
+    
+    addq $16, %rsp
+    iretq

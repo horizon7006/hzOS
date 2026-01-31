@@ -1,8 +1,8 @@
 #ifndef PRINTF_H
 #define PRINTF_H
 
-#include "common.h"
+#include "../core/common.h"
 
-void kprintf(const char* fmt, ...);
+void kprintf(const char *fmt, ...);
 
 #endif

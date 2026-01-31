@@ -28,9 +28,14 @@ int is_transmit_empty() {
     return inb(PORT + 5) & 0x20;
 }
 
+static int serial_lock = 0;
+
 void serial_putc(char c) {
+    if (serial_lock) return;
+    serial_lock = 1;
     while (is_transmit_empty() == 0);
     outb(PORT, c);
+    serial_lock = 0;
 }
 
 void serial_write(const char* str) {
@@ -63,6 +68,10 @@ static void print_hex(uint32_t value) {
 }
 
 void serial_printf(const char* fmt, ...) {
+    static int internal_lock = 0;
+    if (internal_lock) return;
+    internal_lock = 1;
+
     va_list args;
     va_start(args, fmt);
     for (size_t i = 0; fmt[i] != 0; i++) {
@@ -75,9 +84,21 @@ void serial_printf(const char* fmt, ...) {
             case 'c': serial_putc((char)va_arg(args, int)); break;
             case 's': serial_write(va_arg(args, const char*)); break;
             case 'd': print_dec(va_arg(args, int)); break;
-            case 'x': print_hex(va_arg(args, uint32_t)); break;
+            case 'u': {
+                uint32_t v = va_arg(args, uint32_t);
+                if (v == 0) serial_putc('0');
+                else {
+                    char buf[16]; int i = 0;
+                    while (v > 0) { buf[i++] = '0' + (v % 10); v /= 10; }
+                    while (i-- > 0) serial_putc(buf[i]);
+                }
+                break;
+            }
+            case 'x':
+            case 'p': print_hex(va_arg(args, uint32_t)); break;
             default: serial_putc('%'); serial_putc(fmt[i]); break;
         }
     }
     va_end(args);
+    internal_lock = 0;
 }

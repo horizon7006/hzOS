@@ -9,20 +9,26 @@ typedef enum {
 } fs_node_type_t;
 
 typedef struct fs_node {
-    const char* name;
+    char name[32];
     fs_node_type_t type;
-    const struct fs_node* children;
-    size_t child_count;
-    const char* content;
+    struct fs_node* first_child;
+    struct fs_node* next_sibling;
+    struct fs_node* parent;
+    char* content;
     size_t content_len;
 } fs_node_t;
 
 void fs_init(void);
-const fs_node_t* fs_get_root(void);
-const fs_node_t* fs_find(const char* path);
+fs_node_t* fs_get_root(void);
+fs_node_t* fs_find(const char* path);
 void fs_list(const char* path);
 const char* fs_read(const char* path, size_t* out_len);
 int fs_chdir(const char* path);
 const char* fs_get_cwd(void);
+
+/* New Dynamic Functions */
+int fs_mkdir(const char* path);
+int fs_mkfile(const char* path);
+int fs_write_file(const char* path, const char* data, size_t len);
 
 #endif

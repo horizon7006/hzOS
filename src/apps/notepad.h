@@ -1,6 +1,7 @@
 #ifndef NOTEPAD_H
 #define NOTEPAD_H
 
-void notepad_create();
+/* Create a notepad window (integrated kernel-mode app) */
+void notepad_create(void);
 
 #endif

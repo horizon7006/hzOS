@@ -1,6 +1,7 @@
 #ifndef ABOUT_H
 #define ABOUT_H
 
-void about_create();
+/* Create an about dialog window (integrated kernel-mode app) */
+void about_create(void);
 
 #endif

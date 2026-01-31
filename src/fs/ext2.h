@@ -31,6 +31,8 @@ typedef struct {
     uint32_t s_rev_level;
     uint16_t s_def_resuid;
     uint16_t s_def_resgid;
+    uint32_t s_first_ino;
+    uint16_t s_inode_size;
     /* We only need the first part for now. */
 } __attribute__((packed)) ext2_super_block_t;
 
@@ -79,6 +81,10 @@ typedef struct {
 int  ext2_mount_from_ramdisk(void);
 void ext2_print_super(void);
 void ext2_list_root(void);
+
+/* Enhanced file operations */
+int ext2_read_file(uint32_t inode_num, void* buffer, uint32_t size);
+int ext2_find_inode(const char* path);
 
 #endif
 

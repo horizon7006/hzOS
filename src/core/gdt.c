@@ -11,13 +11,13 @@ struct gdt_entry {
 
 struct gdt_ptr {
     uint16_t limit;
-    uint32_t base;
+    uint64_t base;
 } __attribute__((packed));
 
 static struct gdt_entry gdt[3];
 static struct gdt_ptr   gp;
 
-extern void gdt_flush(uint32_t);
+extern void gdt_flush(uint64_t);
 
 static void gdt_set_gate(int num, uint32_t base, uint32_t limit,
                          uint8_t access, uint8_t gran) {
@@ -34,16 +34,21 @@ static void gdt_set_gate(int num, uint32_t base, uint32_t limit,
 
 void gdt_init(void) {
     gp.limit = (sizeof(struct gdt_entry) * 3) - 1;
-    gp.base  = (uint32_t)&gdt;
+    gp.base  = (uint64_t)&gdt;
 
     // Null descriptor
     gdt_set_gate(0, 0, 0, 0, 0);
 
-    // Code segment: base=0, limit=4GB, 0x9A, 0xCF
-    gdt_set_gate(1, 0, 0xFFFFFFFF, 0x9A, 0xCF);
+    // Code segment: base=0, limit=0, Access=0x9A, Gran=0xAF (L-bit set, D-bit clear)
+    // Access: Present, Ring0, Code, Exec/Read
+    // Granularity: 4KB, Long Mode (Bit 21 of high dword = Bit 5 of gran byte)
+    // Old: 0xCF (1100 1111) -> 32-bit Protected
+    // New: 0xAF (1010 1111) -> 64-bit Long Mode (L=1, D=0)
+    gdt_set_gate(1, 0, 0xFFFFFFFF, 0x9A, 0xAF);
 
-    // Data segment: base=0, limit=4GB, 0x92, 0xCF
+    // Data segment: base=0, limit=0, Access=0x92, Gran=0xCF
+    // Do we need L-bit for data? No.
     gdt_set_gate(2, 0, 0xFFFFFFFF, 0x92, 0xCF);
 
-    gdt_flush((uint32_t)&gp);
+    gdt_flush((uint64_t)&gp);
 }

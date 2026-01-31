@@ -1,6 +1,7 @@
 #ifndef TERMINAL_APP_H
 #define TERMINAL_APP_H
 
-void terminal_app_create();
+/* Create a terminal window (integrated kernel-mode app) */
+void terminal_app_create(void);
 
 #endif

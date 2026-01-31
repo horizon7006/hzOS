@@ -7,9 +7,11 @@
 void* memset(void* ptr, int value, size_t num);
 void* memcpy(void* dest, const void* src, size_t count);
 
-/* Simple bump allocator */
+/* Memory allocation */
 void* kmalloc(size_t size);
 void* kmalloc_z(size_t size); /* Allocate and zero */
 void* kmalloc_a(size_t size); /* Allocate page-aligned */
+void* kmalloc_raw_aligned(size_t size); 
+void  kfree(void* ptr);
 
 #endif

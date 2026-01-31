@@ -1,19 +1,24 @@
+.section .text
+.code64
 .global gdt_flush
 
 gdt_flush:
-    mov 4(%esp), %eax    # argument: pointer to gdt_ptr
-    lgdt (%eax)
+    /* Arg1 (RDI) = Pointer to GDT Pointer structure */
+    lgdt (%rdi)
 
-    # Reload segment registers
-    mov $0x10, %ax       # data segment selector (index 2 << 3)
+    /* Reload Data Segments */
+    mov $0x10, %ax
     mov %ax, %ds
     mov %ax, %es
     mov %ax, %fs
     mov %ax, %gs
     mov %ax, %ss
 
-    # Far jump to reload CS
-    ljmp $0x08, $.flush_label
+    /* Reload CS using Far Return (push stack and lretq) */
+    pushq $0x08         /* Push Code Segment */
+    leaq .flush_label(%rip), %rax
+    pushq %rax          /* Push Return Address (RIP) */
+    lretq
 
 .flush_label:
     ret

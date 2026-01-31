@@ -93,3 +93,9 @@ mouse_state_t mouse_get_state(void) {
     return state;
 }
 
+void mouse_reset_position(int x, int y) {
+    state.x = x;
+    state.y = y;
+    packet_index = 0;  // Reset packet state
+}
+
