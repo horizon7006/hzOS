@@ -24,9 +24,31 @@ int sys_write(int fd, const char* buf, int count) {
     return -1;
 }
 
+int sys_read(int fd, char* buf, int count) {
+    if (fd != 0 || !buf || count <= 0) {
+        return -1;
+    }
+
+    int read_count = 0;
+    while (read_count < count) {
+        int c = terminal_get_char();
+        if (c < 0) {
+            break;
+        }
+        buf[read_count++] = (char)c;
+    }
+
+    return read_count;
+}
+
 static void* sys_write_wrapper(uint64_t fd, uint64_t buf, uint64_t count, uint64_t d, uint64_t e) {
     (void)d; (void)e;
     return (void*)(uint64_t)sys_write((int)fd, (const char*)buf, (int)count);
+}
+
+static void* sys_read_wrapper(uint64_t fd, uint64_t buf, uint64_t count, uint64_t d, uint64_t e) {
+    (void)d; (void)e;
+    return (void*)(uint64_t)sys_read((int)fd, (char*)buf, (int)count);
 }
 
 static void* sys_exit_wrapper(uint64_t code, uint64_t b, uint64_t c, uint64_t d, uint64_t e) {
@@ -100,6 +122,7 @@ typedef void* (*syscall_t)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 
 static syscall_t syscalls[] = {
     [SYS_EXIT]  = sys_exit_wrapper,
+    [SYS_READ]  = sys_read_wrapper,
     [SYS_WRITE] = sys_write_wrapper,
     [SYS_GUI_WINDOW_OPEN] = sys_gui_window_open_wrapper,
     [SYS_GUI_DRAW_TEXT]   = sys_gui_draw_text_wrapper,

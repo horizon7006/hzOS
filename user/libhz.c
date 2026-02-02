@@ -19,6 +19,10 @@ int write(int fd, const void* buf, size_t count) {
     return syscall(SYS_WRITE, (uint32_t)fd, (uint32_t)buf, (uint32_t)count, 0, 0);
 }
 
+int read(int fd, void* buf, size_t count) {
+    return syscall(SYS_READ, (uint32_t)fd, (uint32_t)buf, (uint32_t)count, 0, 0);
+}
+
 void print(const char* str) {
     size_t len = 0;
     while (str[len]) len++;
