@@ -9,18 +9,73 @@
 #include "printf.h"
 #include "ramdisk.h"
 #include "terminal.h"
+#include "acpi.h"
+#include "apic.h"
+#include "hpet.h"
+#include "smp.h"
 
 #include "../drivers/pci.h"
 #include "../drivers/nvme.h"
 #include "../drivers/xhci.h"
+#include "../drivers/hda.h"
+#include "../drivers/ahci.h"
 #include "../drivers/rtl8139.h"
 #include "../gui/graphics.h"
 #include "../gui/gui.h"
 #include "../drivers/serial.h"
-#include "multiboot.h"
 #include "paging.h"
 #include "process.h"
 #include "vesa.h"
+#include "limine.h"
+
+// Set the base revision to 2, this is recommended as this is the latest
+// revision described by the Limine boot protocol specification.
+// See specification for further info.
+// Set the base revision to 2.
+__attribute__((used, section(".requests")))
+static volatile LIMINE_BASE_REVISION(2);
+
+// Limine requests markers for v2 protocol
+__attribute__((used, section(".requests_start")))
+static volatile uint64_t requests_start_marker[4] = {
+    0xf6b8f4b39de7d1ae, 0xfab91a6940fcb9cf,
+    0x785c6ed015d3e316, 0x181e920a7852b9d9
+};
+
+__attribute__((used, section(".requests_end")))
+static volatile uint64_t requests_end_marker[2] = {
+    0xadc0e0531bb10d03, 0x9572709f31764c62
+};
+
+// The Limine framebuffer request.
+__attribute__((used, section(".requests")))
+static volatile struct limine_framebuffer_request framebuffer_request = {
+    .id = LIMINE_FRAMEBUFFER_REQUEST,
+    .revision = 0
+};
+
+// The Limine HHDM request.
+__attribute__((used, section(".requests")))
+static volatile struct limine_hhdm_request hhdm_request = {
+    .id = LIMINE_HHDM_REQUEST,
+    .revision = 0
+};
+
+// The Limine RSDP request.
+__attribute__((used, section(".requests")))
+static volatile struct limine_rsdp_request rsdp_request = {
+    .id = LIMINE_RSDP_REQUEST,
+    .revision = 0
+};
+
+// The Limine memory map request.
+__attribute__((used, section(".requests")))
+static volatile struct limine_memmap_request memmap_request = {
+    .id = LIMINE_MEMMAP_REQUEST,
+    .revision = 0
+};
+
+uint64_t g_hhdm_offset = 0;
 
 extern uint8_t _binary_ext2_img_start[];
 extern uint8_t _binary_ext2_img_end[];
@@ -80,20 +135,71 @@ static void tty_key_handler(char c) {
   }
 }
 
-void kernel_main(uint64_t magic, uint64_t addr) {
+void kernel_main(void) {
+  if (hhdm_request.response != NULL) {
+    g_hhdm_offset = hhdm_request.response->offset;
+  }
+
+  // Initialize heap using first large usable memory chunk AS EARLY AS POSSIBLE
+  int heap_initialized = 0;
+  if (memmap_request.response != NULL) {
+    // First pass: find a reasonably large chunk (>= 1MB)
+    for (uint64_t i = 0; i < memmap_request.response->entry_count && !heap_initialized; i++) {
+        struct limine_memmap_entry *entry = memmap_request.response->entries[i];
+        if (entry->type == LIMINE_MEMMAP_USABLE && entry->length >= 1*1024*1024) {
+            uintptr_t heap_base = entry->base + g_hhdm_offset;
+            extern void memory_init(uintptr_t base);
+            memory_init(heap_base);
+            heap_initialized = 1;
+        }
+    }
+  }
+
   serial_init();
-  serial_printf("hzOS: Kernel Main. Magic=%lx Addr=%lx\n", magic, addr);
+  
+  // Debug: Show where heap is
+  extern uintptr_t get_heap_base(void);
+  serial_printf("hzOS: Kernel Main (Limine UEFI Mode)\n");
+  serial_printf("Memory: HHDM offset = %p\n", (void*)g_hhdm_offset);
+  serial_printf("Memory: Heap base = %p\n", (void*)get_heap_base());
 
   gdt_init();
 
-  if (magic == MULTIBOOT_BOOTLOADER_MAGIC) {
-    serial_printf("VESA: Initializing...\n");
-    vesa_init((multiboot_info_t *)addr);
+  // Check if we have a framebuffer from Limine
+  if (framebuffer_request.response == NULL || framebuffer_request.response->framebuffer_count < 1) {
+    serial_printf("Limine: No framebuffer found!\n");
+  } else {
+    struct limine_framebuffer *fb = framebuffer_request.response->framebuffers[0];
+    serial_printf("Limine VESA: %dx%dx%dbpp at %p\n", fb->width, fb->height, fb->bpp, fb->address);
+    vesa_init_limine(fb);
   }
 
   // paging_init(); // Disabled for 64-bit port (using identity map from boot_64.s)
   terminal_init();
   kprintf("hzOS: paging enabled and console initialized\n");
+
+  kprintf("acpi: initializing...\n");
+  void* rsdp_addr = NULL;
+  if (rsdp_request.response != NULL) {
+    rsdp_addr = (void*)rsdp_request.response->address;
+  }
+  
+
+  extern void acpi_init_with_rsdp(void*);
+  acpi_init_with_rsdp(rsdp_addr);
+
+  kprintf("hpet: initializing...\n");
+  hpet_init();
+
+  kprintf("apic: initializing...\n");
+  lapic_init();
+  ioapic_init();
+
+  kprintf("idt: initializing interrupts...\n");
+  idt_init();
+
+  // kprintf("smp: initializing...\n");
+  // smp_init();
 
   kprintf("fs: initializing dynamic filesystem...\n");
   fs_init();
@@ -102,9 +208,6 @@ void kernel_main(uint64_t magic, uint64_t addr) {
 
   kprintf("process: initializing process manager...\n");
   process_init();
-
-  kprintf("idt: initializing interrupts...\n");
-  idt_init();
 
   kprintf("input: initializing keyboard and mouse...\n");
   keyboard_init();
@@ -123,12 +226,14 @@ void kernel_main(uint64_t magic, uint64_t addr) {
   kprintf("xhci: initializing usb...\n");
   xhci_init();
 
-  // Temporarily disabled for stability isolation
-  // kprintf("ahci: initializing storage...\n");
-  // ahci_init();
+  kprintf("hda: initializing...\n");
+  hda_init();
 
-  // kprintf("net: initializing network (rtl8139)...\n");
-  // rtl8139_init();
+  kprintf("ahci: initializing storage...\n");
+  ahci_init();
+
+  kprintf("net: initializing network (rtl8139)....\n");
+  rtl8139_init();
 
   // Auto-mount ramdisk for binaries/apps
   kprintf("kernel: initializing ramdisk...\n");

@@ -73,7 +73,7 @@ void rtl8139_init(void) {
     // Initialize RX Buffer
     rx_buffer = (uint8_t*)kmalloc_a(RX_BUF_TOTAL);
     memset(rx_buffer, 0, RX_BUF_TOTAL);
-    outl(io_base + RTL_REG_RBSTART, (uint32_t)rx_buffer);
+    outl(io_base + RTL_REG_RBSTART, (uint32_t)VIRT_TO_PHYS(rx_buffer));
 
     // Initialize Interrupts
     irq_register_handler(irq, rtl8139_handler);
@@ -96,7 +96,7 @@ void rtl8139_send_packet(void* data, uint32_t len) {
     if (len > 1792) return; // Limit for RTL8139
 
     // Set TX Address
-    outl(io_base + RTL_REG_TSAD0 + current_tsad_index * 4, (uint32_t)data);
+    outl(io_base + RTL_REG_TSAD0 + current_tsad_index * 4, (uint32_t)VIRT_TO_PHYS(data));
     
     // Set TX Status (this triggers the send)
     // Bit 0-12 is length, rest is flags (0x0000 means "start transmission")

@@ -3,6 +3,14 @@
 extern uint32_t _end;
 static uintptr_t placement_addr = (uintptr_t)&_end;
 
+void memory_init(uintptr_t base) {
+    placement_addr = base;
+}
+
+uintptr_t get_heap_base(void) {
+    return placement_addr;
+}
+
 typedef struct malloc_block {
     size_t size;
     int free;
@@ -24,6 +32,17 @@ void* memcpy(void* dest, const void* src, size_t count) {
         *dst8++ = *src8++;
     }
     return dest;
+}
+
+int memcmp(const void* s1, const void* s2, size_t n) {
+    const unsigned char* p1 = s1;
+    const unsigned char* p2 = s2;
+    while (n--) {
+        if (*p1 != *p2) return *p1 - *p2;
+        p1++;
+        p2++;
+    }
+    return 0;
 }
 
 static malloc_block_t* find_free_block(size_t size) {

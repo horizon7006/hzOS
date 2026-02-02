@@ -15,10 +15,10 @@ static void about_paint(window_t *win, uint32_t *buf, int stride, int height) {
   wm_draw_string(win, 60, 20, "hzOS", 0xFFFFFFFF);
 
   /* Version */
-  wm_draw_string(win, 40, 45, "Beta Build 1", 0xFFAACCFF);
+  wm_draw_string(win, 40, 45, "Beta Build 2", 0xFFAACCFF);
 
   /* Description */
-  wm_draw_string(win, 20, 75, "An x64 hobby operating system", 0xFFCCCCCC);
+  wm_draw_string(win, 20, 75, "An x64 hobby OS", 0xFFCCCCCC);
   wm_draw_string(win, 20, 90, "written in C", 0xFFCCCCCC);
 
   /* Credits */

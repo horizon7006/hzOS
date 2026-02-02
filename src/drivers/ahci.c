@@ -4,6 +4,18 @@
 #include "memory.h"
 #include "io.h"
 #include "../core/paging.h"
+#include "../fs/blockdev.h"
+#include "../lib/string.h" // for sprintf/strcpy
+
+static int ahci_bd_read(block_device_t* dev, uint64_t lba, uint32_t count, void* buffer) {
+    HBA_PORT* port = (HBA_PORT*)dev->private_data;
+    return ahci_read(port, (uint32_t)lba, (uint32_t)(lba >> 32), count, (uint16_t*)buffer);
+}
+
+static int ahci_bd_write(block_device_t* dev, uint64_t lba, uint32_t count, const void* buffer) {
+    (void)dev; (void)lba; (void)count; (void)buffer;
+    return -1; // Write not implemented yet
+}
 
 static HBA_MEM* hba_mem = NULL;
 static HBA_PORT* sata_ports[32];
@@ -118,14 +130,16 @@ void ahci_init(void) {
     pci_config_write_word(ahci_dev->bus, ahci_dev->device, ahci_dev->function, PCI_COMMAND, command);
 
     // ABAR is at BAR 5. Mask lower bits (flags)
-    uint32_t abar_phys = ahci_dev->bar5 & 0xFFFFFFF0;
+    uint64_t abar_phys = ahci_dev->bar5 & 0xFFFFFFF0;
+    extern uint64_t g_hhdm_offset;
+    abar_phys += g_hhdm_offset;
     
     // Map AHCI MMIO region (usually 1KB per port, but 4KB is safe for ABAR)
     paging_map_mmio(abar_phys, 4096);
     
     hba_mem = (HBA_MEM*)abar_phys;
     
-    serial_printf("ahci: ABAR at %x (raw: %x)\n", abar_phys, ahci_dev->bar5);
+    serial_printf("ahci: MMIO at %lx\n", abar_phys);
     
     // AE (AHCI Enable) must be 1 before HR or any other port registers
     hba_mem->ghc |= (1 << 31);
@@ -174,14 +188,14 @@ void ahci_init(void) {
                 // Command list offset: 1K aligned
                 void* cl_addr = kmalloc_a(1024);
                 memset(cl_addr, 0, 1024);
-                port->clb = (uint32_t)cl_addr;
-                port->clbu = 0;
+                port->clb = (uint32_t)VIRT_TO_PHYS(cl_addr);
+                port->clbu = (uint32_t)(VIRT_TO_PHYS(cl_addr) >> 32);
 
                 // FIS offset: 256 bytes aligned
                 void* fis_addr = kmalloc_a(256);
                 memset(fis_addr, 0, 256);
-                port->fb = (uint32_t)fis_addr;
-                port->fbu = 0;
+                port->fb = (uint32_t)VIRT_TO_PHYS(fis_addr);
+                port->fbu = (uint32_t)(VIRT_TO_PHYS(fis_addr) >> 32);
 
                 // Command table offset: 128 bytes aligned
                 HBA_CMD_HEADER* cmdhdr = (HBA_CMD_HEADER*)cl_addr;
@@ -189,12 +203,46 @@ void ahci_init(void) {
                     cmdhdr[j].prdtl = 8; // 8 PRDT entries per command table
                     void* ct_addr = kmalloc_a(256);
                     memset(ct_addr, 0, 256);
-                    cmdhdr[j].ctba = (uint32_t)ct_addr;
-                    cmdhdr[j].ctbau = 0;
+                    cmdhdr[j].ctba = (uint32_t)VIRT_TO_PHYS(ct_addr);
+                    cmdhdr[j].ctbau = (uint32_t)(VIRT_TO_PHYS(ct_addr) >> 32);
                 }
 
                 start_cmd(port);
                 serial_printf("ahci: port %d: ready\n", i);
+                
+                // Identify size
+                void* id_buf = kmalloc_raw_aligned(4096); // Use raw aligned to be safe with phys
+                if (ahci_identify(port, id_buf) == 0) {
+                    uint16_t* id = (uint16_t*)id_buf;
+                    uint64_t sectors = 0;
+                    if (id[83] & (1 << 10)) { // LBA48 supported
+                        sectors = *(uint64_t*)&id[100];
+                    } else {
+                        sectors = *(uint32_t*)&id[60];
+                    }
+                    kprintf("ahci: port %d size: %d MB (%ld sectors)\n", i, (sectors * 512) / (1024*1024), sectors);
+
+                    block_device_t* bd = kmalloc(sizeof(block_device_t));
+                    // char name works because we included string.h/printf.h? 
+                    // No sprintf is not standard C, usually we have it in our lib or use kprintf/snprintf. 
+                    // Let's use simple strcpy and manual digit.
+                    strcpy(bd->name, "sata0"); 
+                    bd->name[4] = '0' + i; // Simple hack for sata0..sata9
+                    
+                    bd->sector_count = sectors;
+                    bd->sector_size = 512;
+                    bd->read = ahci_bd_read;
+                    bd->write = ahci_bd_write;
+                    bd->private_data = port;
+                    
+                    blockdev_register(bd);
+                    
+                    extern void gpt_read_table(block_device_t* dev);
+                    gpt_read_table(bd);
+                } else {
+                     kprintf("ahci: port %d identify failed\n", i);
+                }
+                kfree(id_buf); 
             }
         }
     }
@@ -215,8 +263,8 @@ int ahci_identify(HBA_PORT* port, uint16_t* buf) {
     HBA_CMD_TBL* cmdtbl = (HBA_CMD_TBL*)(cmdhdr->ctba);
     memset(cmdtbl, 0, sizeof(HBA_CMD_TBL));
 
-    cmdtbl->prdt_entry[0].dba = (uint32_t)buf;
-    cmdtbl->prdt_entry[0].dbau = 0;
+    cmdtbl->prdt_entry[0].dba = (uint32_t)VIRT_TO_PHYS(buf);
+    cmdtbl->prdt_entry[0].dbau = (uint32_t)(VIRT_TO_PHYS(buf) >> 32);
     cmdtbl->prdt_entry[0].dbc = 511; // 512 bytes
     cmdtbl->prdt_entry[0].i = 1;
 
@@ -265,8 +313,8 @@ int ahci_read(HBA_PORT* port, uint32_t startl, uint32_t starth, uint32_t count, 
     uint32_t temp_count = count;
     int i;
     for (i = 0; i < cmdhdr->prdtl - 1; i++) {
-        cmdtbl->prdt_entry[i].dba = (uint32_t)temp_buf;
-        cmdtbl->prdt_entry[i].dbau = 0;
+        cmdtbl->prdt_entry[i].dba = (uint32_t)VIRT_TO_PHYS(temp_buf);
+        cmdtbl->prdt_entry[i].dbau = (uint32_t)(VIRT_TO_PHYS(temp_buf) >> 32);
         cmdtbl->prdt_entry[i].rsv0 = 0;
         cmdtbl->prdt_entry[i].dbc = 8 * 1024 - 1; // 8K bytes
         cmdtbl->prdt_entry[i].i = 1;
@@ -274,8 +322,8 @@ int ahci_read(HBA_PORT* port, uint32_t startl, uint32_t starth, uint32_t count, 
         temp_count -= 16;
     }
     
-    cmdtbl->prdt_entry[i].dba = (uint32_t)temp_buf;
-    cmdtbl->prdt_entry[i].dbau = 0;
+    cmdtbl->prdt_entry[i].dba = (uint32_t)VIRT_TO_PHYS(temp_buf);
+    cmdtbl->prdt_entry[i].dbau = (uint32_t)(VIRT_TO_PHYS(temp_buf) >> 32);
     cmdtbl->prdt_entry[i].rsv0 = 0;
     cmdtbl->prdt_entry[i].dbc = (temp_count << 9) - 1;
     cmdtbl->prdt_entry[i].i = 1;

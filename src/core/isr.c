@@ -6,7 +6,7 @@
 #define IDT_FLAG_INT32   0x0E
 #define IDT_FLAG_RING0   0x00
 
-extern void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
+extern void idt_set_gate(uint8_t num, uint64_t base, uint16_t sel, uint8_t flags);
 
 /* ISR handler function prototypes from assembly */
 extern void isr0();
@@ -123,11 +123,9 @@ struct registers* irq_handler(struct registers* regs) {
         irq_handlers[irq](regs);
     }
 
-    /* Send End of Interrupt (EOI) to PICs */
-    if (regs->int_no >= 40) {
-        outb(0xA0, 0x20);  // slave
-    }
-    outb(0x20, 0x20);      // master
+    /* Send EOI to LAPIC */
+    extern void lapic_eoi(void);
+    lapic_eoi();
 
     // If timer interrupt, call scheduler
     if (irq == 0) {

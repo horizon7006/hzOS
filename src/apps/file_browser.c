@@ -178,7 +178,7 @@ static void fb_on_click(window_t *win, int x, int y) {
 
 void file_browser_create(const char *start_path) {
   window_t *win = wm_create_window(50, 50, 300, 250, "File Browser");
-  win->bg_color = 0xFFFFFFFF;
+  win->bg_color = 0xEEF0F0F0;
 
   fb_state_t *state = (fb_state_t *)kmalloc_z(sizeof(fb_state_t));
 

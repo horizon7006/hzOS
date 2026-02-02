@@ -1,53 +1,30 @@
-.set MULTIBOOT_PAGE_ALIGN,    1<<0
-.set MULTIBOOT_MEMORY_INFO,   1<<1
-.set MULTIBOOT_VIDEO_MODE,    1<<2
-
-.set MULTIBOOT_MAGIC,  0x1BADB002
-.set MULTIBOOT_FLAGS,  MULTIBOOT_PAGE_ALIGN | MULTIBOOT_MEMORY_INFO | MULTIBOOT_VIDEO_MODE
-.set MULTIBOOT_CHECKSUM, -(MULTIBOOT_MAGIC + MULTIBOOT_FLAGS)
-
-    /* Multiboot header: must be in first 8KiB and in a loadable section */
-    .section .multiboot, "a"
-    .align 4
-    .long MULTIBOOT_MAGIC
-    .long MULTIBOOT_FLAGS
-    .long MULTIBOOT_CHECKSUM
-    /* Address fields (ignored if bit 16 is 0) */
-    .long 0, 0, 0, 0, 0
-    /* Video mode request (bit 2 is 1) */
-    .long 0    /* mode_type: 0 for linear graphics */
-    .long 1024 /* width */
-    .long 768  /* height */
-    .long 32   /* depth */
-
-    .section .text
-    .global _start
-    .extern kernel_main
+.section .text
+.code64
+.global _start
+.extern kernel_main
 
 _start:
+    /* Disable interrupts */
     cli
-    mov $stack_top, %esp
-    /* Save Multiboot info */
-    mov %eax, multiboot_magic
-    mov %ebx, multiboot_info_ptr
-    
-    /* Jump to Long Mode Trampoline */
-    call long_mode_start
+
+    /* Setup a temporary stack for kernel_main */
+    mov $stack_top, %rsp
+
+    /* Linker might put us at ffffffff80000000, 
+       ensure stack is also in higher half if we use it. 
+       For now, we use identity mapping if Limine provides it 
+       or we use Limine's HHDM. */
+
+    /* Jump to kernel_main */
+    call kernel_main
 
 .hang:
     cli
     hlt
     jmp .hang
 
-    .section .bss
-    .align 16
+.section .bss
+.align 16
 stack_bottom:
-    .skip 16384
+    .skip 32768
 stack_top:
-
-    .global multiboot_magic
-    .global multiboot_info_ptr
-multiboot_magic:
-    .long 0
-multiboot_info_ptr:
-    .long 0

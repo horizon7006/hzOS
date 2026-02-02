@@ -12,6 +12,14 @@ DIR_GUI     := $(SRCDIR)/gui
 DIR_APPS    := $(SRCDIR)/apps
 DIR_LIB     := $(SRCDIR)/lib
 DIR_SHELL   := $(SRCDIR)/shell
+DIR_NET     := $(SRCDIR)/net
+
+# Verbosity control
+ifeq ($(V),1)
+  Q :=
+else
+  Q := @
+endif
 
 INCLUDE_FLAGS := -I$(DIR_CORE) -I$(DIR_DRIVERS) -I$(DIR_FS) -I$(DIR_GUI) -I$(DIR_APPS) -I$(DIR_LIB) -I$(DIR_SHELL)
 
@@ -20,7 +28,6 @@ ISO        := $(BUILDDIR)/hzOS.iso
 
 OBJS := \
   $(BUILDDIR)/kernel_entry.o \
-  $(BUILDDIR)/boot_64.o \
   $(BUILDDIR)/kernel.o \
   $(BUILDDIR)/gdt.o \
   $(BUILDDIR)/gdt_flush.o \
@@ -34,6 +41,10 @@ OBJS := \
   $(BUILDDIR)/rtc.o \
   $(BUILDDIR)/ramdisk.o \
   $(BUILDDIR)/filesystem.o \
+  $(BUILDDIR)/blockdev.o \
+  $(BUILDDIR)/gpt.o \
+  $(BUILDDIR)/fat32.o \
+  $(BUILDDIR)/exfat.o \
   $(BUILDDIR)/ext2.o \
   $(BUILDDIR)/ext2_img.o \
   $(BUILDDIR)/terminal.o \
@@ -44,6 +55,7 @@ OBJS := \
   $(BUILDDIR)/memory.o \
   $(BUILDDIR)/font.o \
   $(BUILDDIR)/graphics.o \
+  $(BUILDDIR)/string.o \
   $(BUILDDIR)/window_manager.o \
   $(BUILDDIR)/gui.o \
   $(BUILDDIR)/file_browser.o \
@@ -56,6 +68,12 @@ OBJS := \
   $(BUILDDIR)/ahci.o \
   $(BUILDDIR)/nvme.o \
   $(BUILDDIR)/xhci.o \
+  $(BUILDDIR)/hda.o \
+  $(BUILDDIR)/acpi.o \
+  $(BUILDDIR)/apic.o \
+  $(BUILDDIR)/hpet.o \
+  $(BUILDDIR)/smp.o \
+  $(BUILDDIR)/smp_trampoline.o \
   $(BUILDDIR)/elf.o \
   $(BUILDDIR)/process.o \
   $(BUILDDIR)/syscall.o \
@@ -67,8 +85,8 @@ OBJS := \
   $(BUILDDIR)/paging.o \
   $(BUILDDIR)/timer.o
 
-CFLAGS := -std=gnu99 -ffreestanding -O2 -Wall -Wextra -g -fno-pic -fno-pie -fno-stack-protector -mno-sse -mno-mmx -mno-80387 $(CFLAGS_ARCH) $(INCLUDE_FLAGS)
-LDFLAGS := -nostdlib -T linker.ld $(LDFLAGS_ARCH)
+CFLAGS := -std=gnu11 -ffreestanding -O2 -Wall -Wextra -g -fno-pic -fno-pie -fno-stack-protector -mno-sse -mno-mmx -mno-80387 -mcmodel=kernel -mno-red-zone $(CFLAGS_ARCH) $(INCLUDE_FLAGS)
+LDFLAGS := -nostdlib -T linker.ld -z max-page-size=0x1000 $(LDFLAGS_ARCH)
 
 .PHONY: all kernel iso run-qemu debug-qemu clean
 
@@ -76,190 +94,96 @@ all: $(ISO)
 
 kernel: $(KERNEL_ELF)
 
+# Search paths for source files
+vpath %.c $(DIR_CORE) $(DIR_DRIVERS) $(DIR_FS) $(DIR_GUI) $(DIR_APPS) $(DIR_LIB) $(DIR_SHELL) $(DIR_NET)
+vpath %.s $(DIR_CORE) $(DIR_DRIVERS) $(DIR_FS) $(DIR_GUI) $(DIR_APPS) $(DIR_LIB) $(DIR_SHELL)
+vpath %.S $(DIR_CORE)
+
 $(BUILDDIR):
-	mkdir -p $(BUILDDIR)
+	$(Q)mkdir -p $(BUILDDIR)
 
-$(BUILDDIR)/kernel.o: $(DIR_CORE)/kernel.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILDDIR)/%.o: %.c | $(BUILDDIR)
+	@echo "  CC      $<"
+	$(Q)$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILDDIR)/kernel_entry.o: $(DIR_CORE)/kernel_entry.s | $(BUILDDIR)
-	$(CC) $(CFLAGS_ARCH) -c $< -o $@
+$(BUILDDIR)/%.o: %.s | $(BUILDDIR)
+	@echo "  AS      $<"
+	$(Q)$(CC) $(CFLAGS_ARCH) -c $< -o $@
 
-$(BUILDDIR)/boot_64.o: $(DIR_CORE)/boot_64.s | $(BUILDDIR)
-	$(CC) $(CFLAGS_ARCH) -c $< -o $@
+$(BUILDDIR)/%.o: %.S | $(BUILDDIR)
+	@echo "  AS      $<"
+	$(Q)$(CC) $(CFLAGS_ARCH) -c $< -o $@
 
-$(BUILDDIR)/gdt.o: $(DIR_CORE)/gdt.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILDDIR)/smp_trampoline.bin: src/core/smp_trampoline.S
+	@echo "  NASM    $<"
+	$(Q)nasm -f bin $< -o $@
 
-$(BUILDDIR)/gdt_flush.o: $(DIR_CORE)/gdt_flush.s | $(BUILDDIR)
-	$(CC) $(CFLAGS_ARCH) -c $< -o $@
+$(BUILDDIR)/smp_trampoline.o: $(BUILDDIR)/smp_trampoline.bin
+	@echo "  OBJCOPY $<"
+	$(Q)objcopy -I binary -O elf64-x86-64 -B i386:x86-64 $< $@
 
-$(BUILDDIR)/idt.o: $(DIR_CORE)/idt.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/isr.o: $(DIR_CORE)/isr.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/isr_stub.o: $(DIR_CORE)/isr_stub.s | $(BUILDDIR)
-	$(CC) $(CFLAGS_ARCH) -c $< -o $@
-
-$(BUILDDIR)/serial.o: $(DIR_DRIVERS)/serial.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/keyboard.o: $(DIR_DRIVERS)/keyboard.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/mouse.o: $(DIR_DRIVERS)/mouse.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/vesa.o: $(DIR_DRIVERS)/vesa.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/rtc.o: $(DIR_DRIVERS)/rtc.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/ramdisk.o: $(DIR_DRIVERS)/ramdisk.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/rtl8139.o: $(DIR_DRIVERS)/rtl8139.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/nvme.o: $(DIR_DRIVERS)/nvme.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/xhci.o: $(DIR_DRIVERS)/xhci.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/net.o: src/net/net.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/icmp.o: src/net/icmp.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/udp.o: src/net/udp.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/tcp.o: src/net/tcp.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/filesystem.o: $(DIR_FS)/filesystem.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/ext2.o: $(DIR_FS)/ext2.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# Create a tiny ext2 image on the host (Linux/WSL) with sysroot content.
-# User binary building commented out - using integrated apps instead
-#$(BUILDDIR)/sysroot: | $(BUILDDIR) user-bin
-#	mkdir -p $@/bin
-#	cp user/hello.prog $@/bin/
-#	cp user/about.prog $@/bin/
-#	cp user/notepad.prog $@/bin/
-#	cp user/terminal.prog $@/bin/
-
-# Empty sysroot for now since we're not using user binaries
 $(BUILDDIR)/sysroot: | $(BUILDDIR)
-	mkdir -p $@/bin
+	$(Q)mkdir -p $@/bin
 
 ext2.img: $(BUILDDIR)/sysroot | $(BUILDDIR)
-	mke2fs -d $(BUILDDIR)/sysroot -F $@ 2048
-
-#user-bin:
-#	$(MAKE) -C user
+	@echo "  GEN     $@"
+	$(Q)mke2fs -d $(BUILDDIR)/sysroot -F $@ 2048 > /dev/null 2>&1
 
 $(BUILDDIR)/ext2_img.o: ext2.img | $(BUILDDIR)
-	objcopy -I binary -O elf64-x86-64 -B i386 ext2.img $@
-
-$(BUILDDIR)/terminal.o: $(DIR_SHELL)/terminal.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/command.o: $(DIR_SHELL)/command.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/hzsh_config.o: $(DIR_SHELL)/hzsh_config.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/printf.o: $(DIR_LIB)/printf.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/hzlib.o: $(DIR_LIB)/hzlib.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/memory.o: $(DIR_LIB)/memory.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/font.o: $(DIR_GUI)/font.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/pci.o: $(DIR_DRIVERS)/pci.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/ahci.o: $(DIR_DRIVERS)/ahci.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/elf.o: $(DIR_CORE)/elf.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/process.o: $(DIR_CORE)/process.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/syscall.o: $(DIR_CORE)/syscall.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/paging.o: $(DIR_CORE)/paging.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/timer.o: $(DIR_CORE)/timer.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/graphics.o: $(DIR_GUI)/graphics.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/window_manager.o: $(DIR_GUI)/window_manager.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/gui.o: $(DIR_GUI)/gui.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/file_browser.o: $(DIR_APPS)/file_browser.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/image_viewer.o: $(DIR_APPS)/image_viewer.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/notepad.o: $(DIR_APPS)/notepad.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/terminal_app.o: $(DIR_APPS)/terminal_app.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILDDIR)/about.o: $(DIR_APPS)/about.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-
-$(BUILDDIR)/upng.o: $(DIR_LIB)/upng.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  OBJCOPY $<"
+	$(Q)objcopy -I binary -O elf64-x86-64 -B i386 ext2.img $@
 
 $(KERNEL_ELF): $(OBJS) linker.ld | $(BUILDDIR)
-	$(LD) $(LDFLAGS) -o $@ $(OBJS)
+	@echo "  LD      $@"
+	$(Q)$(LD) $(LDFLAGS) -o $@ $(OBJS)
+
+limine:
+	$(Q)git clone https://github.com/limine-bootloader/limine.git --branch=v8.x-binary --depth=1
+	$(Q)$(MAKE) -C limine
 
 iso: $(ISO)
 
-$(ISO): $(KERNEL_ELF) grub.cfg | $(BUILDDIR)
-	mkdir -p $(ISOROOT)/boot/grub
-	cp grub.cfg $(ISOROOT)/boot/grub/grub.cfg
-	cp $(KERNEL_ELF) $(ISOROOT)/boot/kernel.elf
-	grub-mkrescue -o $@ $(ISOROOT)
+$(ISO): $(KERNEL_ELF) limine.conf grub.cfg | $(BUILDDIR) limine
+	@echo "  ISO     $@"
+	$(Q)rm -rf $(ISOROOT)
+	$(Q)mkdir -p $(ISOROOT)/boot
+	$(Q)cp $(KERNEL_ELF) $(ISOROOT)/
+	$(Q)cp $(KERNEL_ELF) $(ISOROOT)/boot/kernel.elf
+	$(Q)cp limine.conf $(ISOROOT)/
+	$(Q)cp limine.conf $(ISOROOT)/boot/
+	$(Q)mkdir -p $(ISOROOT)/boot/limine
+	$(Q)cp limine.conf $(ISOROOT)/boot/limine/
+	$(Q)mkdir -p $(ISOROOT)/EFI/BOOT
+	$(Q)cp limine.conf $(ISOROOT)/EFI/BOOT/
+	$(Q)cp limine/limine-bios.sys $(ISOROOT)/boot/ 2>/dev/null || true
+	$(Q)cp limine/limine-bios-cd.bin $(ISOROOT)/boot/ 2>/dev/null || true
+	$(Q)cp limine/limine-uefi-cd.bin $(ISOROOT)/boot/ 2>/dev/null || true
+	$(Q)cp limine/BOOTX64.EFI $(ISOROOT)/EFI/BOOT/ 2>/dev/null || true
+	$(Q)cp limine/BOOTIA32.EFI $(ISOROOT)/EFI/BOOT/ 2>/dev/null || true
+	$(Q)xorriso -as mkisofs -b boot/limine-bios-cd.bin \
+		-no-emul-boot -boot-load-size 4 -boot-info-table \
+		--efi-boot boot/limine-uefi-cd.bin \
+		-efi-boot-part --efi-boot-image --protective-msdos-label \
+		$(ISOROOT) -o $@
+	$(Q)limine/limine bios-install $@
 
 # Create a virtual hard disk image for AHCI testing
 hdd.img:
 	dd if=/dev/zero of=hdd.img bs=1M count=64
 
+# Find OVMF if it exists
+OVMF := /usr/share/ovmf/OVMF.fd
+ifeq ($(wildcard $(OVMF)),)
+  OVMF := /usr/share/OVMF/OVMF_CODE.fd
+endif
+
 run-qemu: $(ISO) hdd.img
-	qemu-system-x86_64 -cdrom $(ISO) -drive if=none,id=dr1,file=hdd.img -device ich9-ahci,id=ahci -device ide-hd,drive=dr1,bus=ahci.0 -net nic,model=rtl8139 -net user,hostfwd=tcp::8080-:80,hostfwd=udp::8888-:8888
+	qemu-system-x86_64 -bios $(OVMF) -cdrom $(ISO) -drive if=none,id=dr1,file=hdd.img -device ich9-ahci,id=ahci -device ide-hd,drive=dr1,bus=ahci.0 -net nic,model=rtl8139 -net user,hostfwd=tcp::8080-:80,hostfwd=udp::8888-:8888 -smp 4 -device intel-hda -device hda-duplex,audiodev=audio0 -audiodev pa,id=audio0
 
 debug-qemu: $(ISO) hdd.img
-	qemu-system-i386 -cdrom $(ISO) -drive if=none,id=dr1,file=hdd.img -device ich9-ahci,id=ahci -device ide-hd,drive=dr1,bus=ahci.0 -net nic,model=rtl8139 -net user -serial stdio
+	qemu-system-x86_64 -bios $(OVMF) -cdrom $(ISO) -drive if=none,id=dr1,file=hdd.img -device ich9-ahci,id=ahci -device ide-hd,drive=dr1,bus=ahci.0 -net nic,model=rtl8139 -net user,hostfwd=tcp::8080-:80,hostfwd=udp::8888-:8888 -smp 4 -serial stdio -device intel-hda -device hda-duplex,audiodev=audio0 -audiodev pa,id=audio0
 
 clean:
 	rm -rf $(BUILDDIR)
+
+

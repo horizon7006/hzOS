@@ -2,6 +2,17 @@
 #include "../lib/memory.h"
 #include "../lib/printf.h"
 #include "../core/io.h"
+#include "../fs/blockdev.h"
+
+static int nvme_bd_read(block_device_t* dev, uint64_t lba, uint32_t count, void* buffer) {
+    (void)dev;
+    return nvme_read(lba, count, buffer);
+}
+
+static int nvme_bd_write(block_device_t* dev, uint64_t lba, uint32_t count, const void* buffer) {
+    (void)dev;
+    return nvme_write(lba, count, buffer);
+}
 
 static nvme_controller_t g_nvme;
 
@@ -31,7 +42,8 @@ static int nvme_controller_init(nvme_controller_t* nvme, pci_device_t* pci) {
     if ((pci->bar0 & 0x6) == 0x4) { // 64-bit BAR
         full_bar |= ((uint64_t)pci->bar1 << 32);
     }
-    nvme->bar0 = full_bar;
+    extern uint64_t g_hhdm_offset;
+    nvme->bar0 = full_bar + g_hhdm_offset;
     
     // 1. Get Capabilities
     uint64_t cap = nvme_read_reg64(nvme, NVME_REG_CAP);
@@ -74,8 +86,8 @@ static int nvme_controller_init(nvme_controller_t* nvme, pci_device_t* pci) {
     uint32_t aqa = ((admin_q_size - 1) << 16) | (admin_q_size - 1);
     nvme_write_reg32(nvme, NVME_REG_AQA, aqa);
     
-    nvme_write_reg64(nvme, NVME_REG_ASQ, (uintptr_t)nvme->admin_sq);
-    nvme_write_reg64(nvme, NVME_REG_ACQ, (uintptr_t)nvme->admin_cq);
+    nvme_write_reg64(nvme, NVME_REG_ASQ, VIRT_TO_PHYS(nvme->admin_sq));
+    nvme_write_reg64(nvme, NVME_REG_ACQ, VIRT_TO_PHYS(nvme->admin_cq));
     
     // 4. Enable Controller
     nvme_write_reg32(nvme, NVME_REG_CC, cc | 1);
@@ -138,7 +150,7 @@ static int nvme_identify(nvme_controller_t* nvme) {
     memset(buffer, 0, 4096);
     
     cmd.cdw0 = NVME_OP_ADMIN_IDENTIFY;
-    cmd.prp1 = (uintptr_t)buffer;
+    cmd.prp1 = VIRT_TO_PHYS(buffer);
     cmd.cdw10 = 1; // Identify Controller
     
     nvme_cq_entry_t res;
@@ -163,7 +175,7 @@ static int nvme_identify(nvme_controller_t* nvme) {
         // Identify Namespace 1
         memset(&cmd, 0, sizeof(cmd));
         cmd.cdw0 = NVME_OP_ADMIN_IDENTIFY;
-        cmd.prp1 = (uintptr_t)buffer;
+        cmd.prp1 = VIRT_TO_PHYS(buffer);
         cmd.nsid = 1;
         cmd.cdw10 = 0; // Identify Namespace
         
@@ -195,7 +207,7 @@ static int nvme_create_io_queues(nvme_controller_t* nvme) {
     // Create I/O CQ (ID 1)
     /* CDW10: QID=1, QSIZE=511 (512 entries) */
     cmd.cdw0 = NVME_OP_ADMIN_CREATE_IO_CQ;
-    cmd.prp1 = (uintptr_t)nvme->io_cq;
+    cmd.prp1 = VIRT_TO_PHYS(nvme->io_cq);
     cmd.cdw10 = (511 << 16) | 1; 
     cmd.cdw11 = 1; // PC (Physically Contiguous) = 1
     
@@ -212,7 +224,7 @@ static int nvme_create_io_queues(nvme_controller_t* nvme) {
     
     /* CDW10: QID=1, QSIZE=511 */
     cmd.cdw0 = NVME_OP_ADMIN_CREATE_IO_SQ;
-    cmd.prp1 = (uintptr_t)nvme->io_sq;
+    cmd.prp1 = VIRT_TO_PHYS(nvme->io_sq);
     cmd.cdw10 = (511 << 16) | 1;
     cmd.cdw11 = (1 << 16) | 1; // CQID=1, PC=1
     
@@ -251,6 +263,21 @@ void nvme_init(void) {
         if (nvme_identify(&g_nvme) == 0) {
             if (nvme_create_io_queues(&g_nvme) == 0) {
                 kprintf("NVMe: Ready for I/O\n");
+
+                // Register as Block Device
+                block_device_t* bd = kmalloc(sizeof(block_device_t));
+                strcpy(bd->name, "nvme0n1");
+                bd->sector_count = g_nvme.sector_count;
+                bd->sector_size = g_nvme.sector_size;
+                bd->read = nvme_bd_read;
+                bd->write = nvme_bd_write;
+                bd->private_data = &g_nvme;
+                
+                blockdev_register(bd);
+                
+                // Scan for partitions
+                extern void gpt_read_table(block_device_t* dev);
+                gpt_read_table(bd);
             }
         }
     }
@@ -265,7 +292,7 @@ int nvme_read(uint64_t lba, uint32_t count, void* buffer) {
     memset(&cmd, 0, sizeof(cmd));
     cmd.cdw0 = NVME_OP_IO_READ | (g_cid << 16);
     cmd.nsid = g_nvme.nsid;
-    cmd.prp1 = (uintptr_t)buffer;
+    cmd.prp1 = VIRT_TO_PHYS(buffer);
     cmd.cdw10 = (uint32_t)(lba & 0xFFFFFFFF);
     cmd.cdw11 = (uint32_t)(lba >> 32);
     cmd.cdw12 = (count - 1) & 0xFFFF; // 0-based
@@ -303,7 +330,7 @@ int nvme_write(uint64_t lba, uint32_t count, const void* buffer) {
     memset(&cmd, 0, sizeof(cmd));
     cmd.cdw0 = NVME_OP_IO_WRITE | (g_cid << 16);
     cmd.nsid = g_nvme.nsid;
-    cmd.prp1 = (uintptr_t)buffer;
+    cmd.prp1 = VIRT_TO_PHYS(buffer);
     cmd.cdw10 = (uint32_t)(lba & 0xFFFFFFFF);
     cmd.cdw11 = (uint32_t)(lba >> 32);
     cmd.cdw12 = (count - 1) & 0xFFFF;

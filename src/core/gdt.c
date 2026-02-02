@@ -32,6 +32,12 @@ static void gdt_set_gate(int num, uint32_t base, uint32_t limit,
     gdt[num].access      = access;
 }
 
+void gdt_flush(uint64_t);
+ 
+void gdt_ap_load(void) {
+    gdt_flush((uint64_t)&gp);
+}
+
 void gdt_init(void) {
     gp.limit = (sizeof(struct gdt_entry) * 3) - 1;
     gp.base  = (uint64_t)&gdt;

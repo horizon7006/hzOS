@@ -33,6 +33,10 @@ void idt_set_gate(uint8_t num, uint64_t base, uint16_t sel, uint8_t flags) {
     idt[num].reserved  = 0;
 }
 
+void idt_ap_load(void) {
+    idt_load((uint64_t)&idtp);
+}
+
 void idt_init(void) {
     idtp.limit = sizeof(struct idt_entry) * 256 - 1;
     idtp.base  = (uint64_t)&idt;

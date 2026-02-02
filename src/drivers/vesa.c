@@ -8,27 +8,35 @@ int vesa_height = 0;
 int vesa_pitch = 0;
 int vesa_bpp = 0;
 
-void vesa_init(multiboot_info_t* mbi) {
-    if (!mbi) {
-        serial_printf("VESA: MBI is NULL\n");
+void vesa_init_limine(struct limine_framebuffer* fb) {
+    if (!fb) {
+        serial_printf("VESA: Limine framebuffer is NULL\n");
         return;
     }
 
-    /* Check if MULTIBOOT_VIDEO_MODE flag (bit 11 in vbe, 12 in flags) */
-    if (mbi->flags & (1 << 12)) {
-        vesa_video_memory = (uint32_t*)(uintptr_t)mbi->framebuffer_addr;
-        vesa_width = mbi->framebuffer_width;
-        vesa_height = mbi->framebuffer_height;
-        vesa_pitch = mbi->framebuffer_pitch;
-        vesa_bpp = mbi->framebuffer_bpp;
-
-        serial_printf("VESA: %dx%dx%d at %x P=%d\n", vesa_width, vesa_height, vesa_bpp, vesa_video_memory, vesa_pitch);
-        
-        /* Immediate visual feedback: Blue Screen */
-        vesa_clear(0xFF0000FF);
-    } else {
-        serial_printf("VESA: Multiboot framebuffer info not present. Flags=%x\n", mbi->flags);
+    // Limine should provide HHDM-mapped address, but verify
+    // If address appears to be physical (below HHDM range), add offset
+    extern uint64_t g_hhdm_offset;
+    uintptr_t addr = (uintptr_t)fb->address;
+    
+    // HHDM addresses are typically > 0xffff800000000000 (higher half)
+    // If address is low, it's physical and needs mapping
+    if (addr < 0x100000000ULL) {
+        // Address is below 4GB, likely physical - add HHDM offset
+        addr += g_hhdm_offset;
+        serial_printf("VESA: Applying HHDM offset to framebuffer\n");
     }
+    
+    vesa_video_memory = (uint32_t*)addr;
+    vesa_width = fb->width;
+    vesa_height = fb->height;
+    vesa_pitch = fb->pitch;
+    vesa_bpp = fb->bpp;
+
+    serial_printf("VESA (Limine): %dx%dx%d at %p P=%d\n", vesa_width, vesa_height, vesa_bpp, (void*)vesa_video_memory, vesa_pitch);
+    
+    /* Immediate visual feedback: Blue Screen */
+    vesa_clear(0xFF0000FF);
 }
 
 void vesa_put_pixel(int x, int y, uint32_t color) {

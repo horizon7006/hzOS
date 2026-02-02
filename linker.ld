@@ -2,17 +2,20 @@ ENTRY(_start)
 
 SECTIONS
 {
-    /* Load kernel at 1 MiB, a common OSDev convention */
-    . = 1M;
-
-    .multiboot :
-    {
-        *(.multiboot)
-    }
+    /* Use higher-half address for the kernel */
+    . = 0xffffffff80000000;
 
     .text :
     {
         *(.text*)
+    }
+
+    /* Limine requests section */
+    .requests :
+    {
+        KEEP(*(.requests_start))
+        KEEP(*(.requests))
+        KEEP(*(.requests_end))
     }
 
     .rodata :

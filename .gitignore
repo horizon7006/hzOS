@@ -11,3 +11,11 @@ iso/
 *.log
 *.txt
 *.prog
+*.EFI
+*.efi
+*.sys
+*.exe
+limine/
+*.dSYM
+*.dSYM/
+.DS_Store

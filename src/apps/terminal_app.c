@@ -76,8 +76,8 @@ static void terminal_app_paint(window_t *win, uint32_t *buf, int stride,
   if (!state)
     return;
 
-  /* Black background */
-  wm_fill_rect(win, 0, 0, win->width, win->height, 0xFF000000);
+  /* Translucent black background */
+  wm_fill_rect(win, 0, 0, win->width, win->height, 0xCC000000);
 
   /* Draw screen buffer */
   for (int i = 0; i < TERM_ROWS; i++) {
@@ -145,7 +145,7 @@ void terminal_app_create(void) {
   if (!win)
     return;
 
-  win->bg_color = 0xFF000000;
+  win->bg_color = 0xCC000000;
 
   terminal_app_state_t *state =
       (terminal_app_state_t *)kmalloc_z(sizeof(terminal_app_state_t));

@@ -91,3 +91,119 @@ void gfx_draw_string_to_buffer(uint32_t* buf, int x, int y, int stride, int heig
         x += 8;
     }
 }
+
+// Helper to check if a point is within a circle
+static inline int is_in_circle(int x, int y, int r) {
+    return (x*x + y*y) <= (r*r);
+}
+
+void gfx_fill_rounded_rect_to_buffer(uint32_t* buf, int x, int y, int w, int h, int r, int stride, int buf_h, uint32_t color) {
+    for (int j = 0; j < h; j++) {
+        for (int i = 0; i < w; i++) {
+            int px = x + i;
+            int py = y + j;
+            if (px < 0 || px >= stride || py < 0 || py >= buf_h) continue;
+
+            int draw = 1;
+            // Top-left
+            if (i < r && j < r) {
+                if (!is_in_circle(i - r, j - r, r)) draw = 0;
+            }
+            // Top-right
+            else if (i >= w - r && j < r) {
+                if (!is_in_circle(i - (w - r - 1), j - r, r)) draw = 0;
+            }
+            // Bottom-left
+            else if (i < r && j >= h - r) {
+                if (!is_in_circle(i - r, j - (h - r - 1), r)) draw = 0;
+            }
+            // Bottom-right
+            else if (i >= w - r && j >= h - r) {
+                if (!is_in_circle(i - (w - r - 1), j - (h - r - 1), r)) draw = 0;
+            }
+
+            if (draw) {
+                // Alpha blending (simple)
+                uint8_t alpha = (color >> 24) & 0xFF;
+                if (alpha == 0xFF) {
+                    buf[py * stride + px] = color;
+                } else if (alpha > 0) {
+                    uint32_t bg = buf[py * stride + px];
+                    uint8_t r_b = (bg >> 16) & 0xFF, g_b = (bg >> 8) & 0xFF, b_b = bg & 0xFF;
+                    uint8_t r_f = (color >> 16) & 0xFF, g_f = (color >> 8) & 0xFF, b_f = color & 0xFF;
+                    uint8_t r_r = (r_f * alpha + r_b * (255 - alpha)) / 255;
+                    uint8_t g_r = (g_f * alpha + g_b * (255 - alpha)) / 255;
+                    uint8_t b_r = (b_f * alpha + b_b * (255 - alpha)) / 255;
+                    buf[py * stride + px] = (0xFF << 24) | (r_r << 16) | (g_r << 8) | b_r;
+                }
+            }
+        }
+    }
+}
+
+void gfx_fill_rounded_rect(int x, int y, int w, int h, int r, uint32_t color) {
+    gfx_fill_rounded_rect_to_buffer(vesa_video_memory, x, y, w, h, r, vesa_width, vesa_height, color);
+}
+
+void gfx_draw_gradient(int x, int y, int w, int h, uint32_t color1, uint32_t color2, int vertical) {
+    uint8_t r1 = (color1 >> 16) & 0xFF, g1 = (color1 >> 8) & 0xFF, b1 = color1 & 0xFF;
+    uint8_t r2 = (color2 >> 16) & 0xFF, g2 = (color2 >> 8) & 0xFF, b2 = color2 & 0xFF;
+
+    if (vertical) {
+        for (int j = 0; j < h; j++) {
+            uint8_t r = r1 + (r2 - r1) * j / h;
+            uint8_t g = g1 + (g2 - g1) * j / h;
+            uint8_t b = b1 + (b2 - b1) * j / h;
+            uint32_t color = (0xFF << 24) | (r << 16) | (g << 8) | b;
+            vesa_fill_rect(x, y + j, w, 1, color);
+        }
+    } else {
+        for (int i = 0; i < w; i++) {
+            uint8_t r = r1 + (r2 - r1) * i / w;
+            uint8_t g = g1 + (g2 - g1) * i / w;
+            uint8_t b = b1 + (b2 - b1) * i / w;
+            uint32_t color = (0xFF << 24) | (r << 16) | (g << 8) | b;
+            vesa_fill_rect(x + i, y, 1, h, color);
+        }
+    }
+}
+
+void gfx_draw_gradient_to_buffer(uint32_t* buf, int x, int y, int w, int h, int stride, int height, uint32_t color1, uint32_t color2, int vertical) {
+    uint8_t r1 = (color1 >> 16) & 0xFF, g1 = (color1 >> 8) & 0xFF, b1 = color1 & 0xFF;
+    uint8_t r2 = (color2 >> 16) & 0xFF, g2 = (color2 >> 8) & 0xFF, b2 = color2 & 0xFF;
+
+    if (vertical) {
+        for (int j = 0; j < h; j++) {
+            int py = y + j;
+            if (py >= height) break;
+            uint8_t r = r1 + (r2 - r1) * j / h;
+            uint8_t g = g1 + (g2 - g1) * j / h;
+            uint8_t b = b1 + (b2 - b1) * j / h;
+            uint32_t color = (0xFF << 24) | (r << 16) | (g << 8) | b;
+            
+            for (int i = 0; i < w; i++) {
+                int px = x + i;
+                if (px < stride) {
+                    buf[py * stride + px] = color;
+                }
+            }
+        }
+    } else {
+        // Horizontal gradient implementation if needed
+        for (int i = 0; i < w; i++) {
+            int px = x + i;
+            if (px >= stride) break;
+            uint8_t r = r1 + (r2 - r1) * i / w;
+            uint8_t g = g1 + (g2 - g1) * i / w;
+            uint8_t b = b1 + (b2 - b1) * i / w;
+            uint32_t color = (0xFF << 24) | (r << 16) | (g << 8) | b;
+
+            for (int j = 0; j < h; j++) {
+                int py = y + j;
+                if (py < height) {
+                    buf[py * stride + px] = color;
+                }
+            }
+        }
+    }
+}

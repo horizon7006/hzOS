@@ -1,7 +1,10 @@
 #include "printf.h"
 #include "../shell/terminal.h"
+#include "../core/spinlock.h"
 
 #include <stdarg.h>
+
+static spinlock_t g_printf_lock = 0;
 
 static void print_dec(int value) {
   char buf[16];
@@ -42,6 +45,8 @@ static void print_hex(uint32_t value) {
 }
 
 void kprintf(const char *fmt, ...) {
+  spinlock_lock(&g_printf_lock);
+
   va_list args;
   va_start(args, fmt);
 
@@ -60,8 +65,8 @@ void kprintf(const char *fmt, ...) {
       break;
     }
     case 'p': {
-      uint32_t v = (uint32_t)va_arg(args, void *);
-      print_hex(v);
+      uintptr_t v = (uintptr_t)va_arg(args, void *);
+      print_hex((uint32_t)v);
       break;
     }
     case 's': {
@@ -112,4 +117,5 @@ void kprintf(const char *fmt, ...) {
   }
 
   va_end(args);
+  spinlock_unlock(&g_printf_lock);
 }

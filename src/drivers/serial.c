@@ -67,6 +67,15 @@ static void print_hex(uint32_t value) {
     }
 }
 
+static void print_hex64(uint64_t value) {
+    const char* digits = "0123456789ABCDEF";
+    serial_write("0x");
+    for (int i = 60; i >= 0; i -= 4) {
+        uint8_t nibble = (value >> i) & 0xF;
+        serial_putc(digits[nibble]);
+    }
+}
+
 void serial_printf(const char* fmt, ...) {
     static int internal_lock = 0;
     if (internal_lock) return;
@@ -80,6 +89,12 @@ void serial_printf(const char* fmt, ...) {
             continue;
         }
         i++;
+        // Check for 'l' modifier
+        int is_long = 0;
+        if (fmt[i] == 'l') {
+            is_long = 1;
+            i++;
+        }
         switch (fmt[i]) {
             case 'c': serial_putc((char)va_arg(args, int)); break;
             case 's': serial_write(va_arg(args, const char*)); break;
@@ -88,15 +103,21 @@ void serial_printf(const char* fmt, ...) {
                 uint32_t v = va_arg(args, uint32_t);
                 if (v == 0) serial_putc('0');
                 else {
-                    char buf[16]; int i = 0;
-                    while (v > 0) { buf[i++] = '0' + (v % 10); v /= 10; }
-                    while (i-- > 0) serial_putc(buf[i]);
+                    char buf[16]; int j = 0;
+                    while (v > 0) { buf[j++] = '0' + (v % 10); v /= 10; }
+                    while (j-- > 0) serial_putc(buf[j]);
                 }
                 break;
             }
             case 'x':
-            case 'p': print_hex(va_arg(args, uint32_t)); break;
-            default: serial_putc('%'); serial_putc(fmt[i]); break;
+                if (is_long) {
+                    print_hex64(va_arg(args, uint64_t));
+                } else {
+                    print_hex(va_arg(args, uint32_t));
+                }
+                break;
+            case 'p': print_hex64(va_arg(args, uint64_t)); break;
+            default: serial_putc('%'); if (is_long) serial_putc('l'); serial_putc(fmt[i]); break;
         }
     }
     va_end(args);

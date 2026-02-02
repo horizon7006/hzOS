@@ -6,6 +6,7 @@
 
 void* memset(void* ptr, int value, size_t num);
 void* memcpy(void* dest, const void* src, size_t count);
+int memcmp(const void* s1, const void* s2, size_t n);
 
 /* Memory allocation */
 void* kmalloc(size_t size);

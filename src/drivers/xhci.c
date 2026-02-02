@@ -32,7 +32,7 @@ static int xhci_submit_cmd(xhci_controller_t* xhci, xhci_trb_t* cmd) {
     xhci->cmd_ring_index++;
     if (xhci->cmd_ring_index >= 63) { // 64th is Link TRB
         xhci_trb_t* link = &xhci->cmd_ring[63];
-        link->parameter = (uintptr_t)xhci->cmd_ring;
+        link->parameter = VIRT_TO_PHYS(xhci->cmd_ring);
         link->status = 0;
         link->control = (6 << 10) | (1 << 1) | xhci->cmd_cycle; // Link type, TC=1
         
@@ -45,9 +45,10 @@ static int xhci_submit_cmd(xhci_controller_t* xhci, xhci_trb_t* cmd) {
 }
 
 static int xhci_controller_init(xhci_controller_t* xhci, pci_device_t* pci) {
-    xhci->bar = pci->bar0 & ~0xF;
+    extern uint64_t g_hhdm_offset;
+    xhci->bar = (pci->bar0 & ~0xF) + g_hhdm_offset;
     if ((pci->bar0 & 0x6) == 0x4) {
-        xhci->bar |= ((uint64_t)pci->bar1 << 32);
+        xhci->bar += ((uint64_t)pci->bar1 << 32);
     }
 
     xhci->cap_length = *(volatile uint8_t*)(xhci->bar + XHCI_CAP_CAPLENGTH);
@@ -77,7 +78,7 @@ static int xhci_controller_init(xhci_controller_t* xhci, pci_device_t* pci) {
     // 2. Setup Device Context Base Address Array Pointer (DCBAAP)
     xhci->dcbaap = (uint64_t*)kmalloc_raw_aligned(4096);
     memset(xhci->dcbaap, 0, 4096);
-    *(volatile uint64_t*)(xhci->op_base + XHCI_OP_DCBAAP) = (uintptr_t)xhci->dcbaap;
+    *(volatile uint64_t*)(xhci->op_base + XHCI_OP_DCBAAP) = VIRT_TO_PHYS(xhci->dcbaap);
 
     // 3. Setup Command Ring (64 entries)
     xhci->cmd_ring = (xhci_trb_t*)kmalloc_raw_aligned(4096);
@@ -86,7 +87,7 @@ static int xhci_controller_init(xhci_controller_t* xhci, pci_device_t* pci) {
     xhci->cmd_cycle = 1;
 
     // CRCR: Command Ring Control Register
-    *(volatile uint64_t*)(xhci->op_base + XHCI_OP_CRCR) = (uintptr_t)xhci->cmd_ring | 1;
+    *(volatile uint64_t*)(xhci->op_base + XHCI_OP_CRCR) = VIRT_TO_PHYS(xhci->cmd_ring) | 1;
 
     // 4. Setup Event Ring (simplified: 1 segment)
     // Actually needs Event Ring Segment Table (ERST)
@@ -95,15 +96,19 @@ static int xhci_controller_init(xhci_controller_t* xhci, pci_device_t* pci) {
     memset(erst, 0, 4096);
     memset(event_ring, 0, 4096);
 
+    xhci->event_ring = (xhci_trb_t*)event_ring;
+    xhci->event_ring_index = 0;
+    xhci->event_cycle = 1;
+
     // ERST Entry 0: Base Address, Size
-    *(uint64_t*)erst = (uintptr_t)event_ring;
+    *(uint64_t*)erst = VIRT_TO_PHYS(event_ring);
     *(uint32_t*)((uint8_t*)erst + 8) = 256; // 256 entries
 
     // Runtime Registers: IMAN, IMOD, ERSTSZ, ERSTBA, ERDP
     // Interrupter 0
     *(volatile uint32_t*)(xhci->rt_base + 0x20 + 0x08) = 1; // ERSTSZ = 1
-    *(volatile uint64_t*)(xhci->rt_base + 0x20 + 0x10) = (uintptr_t)erst; // ERSTBA
-    *(volatile uint64_t*)(xhci->rt_base + 0x20 + 0x18) = (uintptr_t)event_ring; // ERDP
+    *(volatile uint64_t*)(xhci->rt_base + 0x20 + 0x10) = VIRT_TO_PHYS(erst); // ERSTBA
+    *(volatile uint64_t*)(xhci->rt_base + 0x20 + 0x18) = VIRT_TO_PHYS(event_ring) | (1 << 3); // ERDP + EHB
 
     // 5. Enable Slots
     uint32_t config = xhci_read_op32(xhci, XHCI_OP_CONFIG);
@@ -122,18 +127,20 @@ static int xhci_controller_init(xhci_controller_t* xhci, pci_device_t* pci) {
 static int xhci_poll_event(xhci_controller_t* xhci, xhci_trb_t* event) {
     // Note: event_ring is managed by Interrupter 0
     // Simplified: event_ring is at RT_BASE + 0x20
-    volatile void* event_ring_ptr = (void*)*(uint64_t*)(xhci->rt_base + 0x20 + 0x18);
-    xhci_trb_t* ev = (xhci_trb_t*)event_ring_ptr;
-
-    // We need to track the cycle bit and index for the event ring too
-    // For now, just check if something changed (naive)
-    if (ev->control == 0) return -1;
+    xhci_trb_t* ev = &xhci->event_ring[xhci->event_ring_index];
+    if ((ev->control & 1) != xhci->event_cycle) return -1;
     
     if (event) memcpy(event, ev, sizeof(xhci_trb_t));
     
     // Clear and Move (Simplified)
-    memset(ev, 0, sizeof(xhci_trb_t));
-    *(volatile uint64_t*)(xhci->rt_base + 0x20 + 0x18) = (uintptr_t)ev | (1 << 3); // Dequeue pointer + EHB
+    // Move Head
+    xhci->event_ring_index++;
+    if (xhci->event_ring_index >= 256) {
+        xhci->event_ring_index = 0;
+        xhci->event_cycle ^= 1;
+    }
+    
+    *(volatile uint64_t*)(xhci->rt_base + 0x20 + 0x18) = VIRT_TO_PHYS(&xhci->event_ring[xhci->event_ring_index]) | (1 << 3); // Dequeue pointer + EHB
     
     return 0;
 }
@@ -164,13 +171,13 @@ static int xhci_address_device(xhci_controller_t* xhci, uint32_t slot_id) {
     // 2. Setup Device Context for the slot
     void* device_context = kmalloc_raw_aligned(4096);
     memset(device_context, 0, 4096);
-    xhci->dcbaap[slot_id] = (uintptr_t)device_context;
+    xhci->dcbaap[slot_id] = VIRT_TO_PHYS(device_context);
     
     // 3. Submit Address Device Command
     xhci_trb_t cmd;
     memset(&cmd, 0, sizeof(cmd));
-    cmd.parameter = (uintptr_t)input_context;
-    cmd.control = (TRB_TYPE_ADDRESS_DEVICE << 10) | (slot_id << 24);
+    cmd.parameter = VIRT_TO_PHYS(input_context);
+    cmd.control = (TRB_TYPE_ADDRESS_DEVICE << 10) | (slot_id << 24) | xhci->cmd_cycle;
     
     xhci_submit_cmd(xhci, &cmd);
     

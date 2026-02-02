@@ -53,6 +53,10 @@ typedef struct {
     uint32_t cmd_ring_index;
     uint8_t cmd_cycle;
 
+    xhci_trb_t* event_ring;
+    uint32_t event_ring_index;
+    uint8_t event_cycle;
+
     uint64_t* dcbaap;
 } xhci_controller_t;
 

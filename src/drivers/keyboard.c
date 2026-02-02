@@ -211,9 +211,9 @@ static void keyboard_handle_command(void) {
 
 void keyboard_init(void) {
     irq_register_handler(1, keyboard_irq_handler);
-    uint8_t mask = inb(0x21);
-    mask &= ~(1 << 1);
-    outb(0x21, mask);
+    
+    extern void ioapic_set_irq(uint8_t irq, uint32_t apic_id, uint32_t flags_vector);
+    ioapic_set_irq(1, 0, 33); // IRQ 1 -> Vector 33 (0x21)
     
     // Set initial LED state
     // keyboard_set_leds(); // Disabled to prevent hang

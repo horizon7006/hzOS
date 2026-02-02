@@ -117,7 +117,8 @@ void process_execute(process_t* proc) {
     
     regs->rip = proc->entry_point;
     regs->cs = 0x08;
-    regs->ds = 0x00; // Null DS in 64-bit usually
+    regs->ds = 0x10;
+    regs->ss = 0x10;
     regs->rflags = 0x202; // IF = 1
     regs->rsp = proc->stack_pointer;
     

@@ -103,7 +103,6 @@ IRQ 15
 
 /* Common ISR Stub */
 isr_common_stub:
-    /* Save registers */
     pushq %rax
     pushq %rcx
     pushq %rdx
@@ -119,20 +118,23 @@ isr_common_stub:
     pushq %r13
     pushq %r14
     pushq %r15
-
-    /* Save Data Segment (sanity check, usually 0 in 64-bit but good practice) */
-    /* Only FS/GS are relevant, but we skip for now as kernel uses null selectors usually */
     movq %ds, %rax
     pushq %rax
 
-    /* ABI: Pass stack pointer as 1st argument (RDI) to handler */
     movq %rsp, %rdi
     
+    /* Align stack to 16 bytes for C call */
+    movq %rsp, %rax
+    pushq %rax
+    andq $-16, %rsp
+    
     call isr_handler
+    
+    /* Restore stack */
+    popq %rsp
 
-    /* Restore registers */
     popq %rax
-    /* mov %ax, %ds - Segments don't really matter in 64-bit flat mode */
+    /* mov %ax, %ds */
     
     popq %r15
     popq %r14
@@ -150,7 +152,7 @@ isr_common_stub:
     popq %rcx
     popq %rax
     
-    addq $16, %rsp /* Pop error code and int number */
+    addq $16, %rsp
     iretq
 
 /* Common IRQ Stub */
@@ -170,36 +172,24 @@ irq_common_stub:
     pushq %r13
     pushq %r14
     pushq %r15
-
     movq %ds, %rax
     pushq %rax
 
     movq %rsp, %rdi
     
-    call irq_handler
-    /* Handler might switch stack (scheduler). If so, it returns new RSP?
-       For now, we assume simple return. 
-       If scheduler needs to switch, it should update current_process->rsp 
-       and we manually switch? 
-       In 32-bit, we did `mov %eax, %esp`.
-       Here we should check if we need to switch?
-       Wait, `irq_handler` in 32-bit was `void`.
-       Ah, `isr_common_stub` called `isr_handler` (void).
-       
-       But `scheduler` was separate.
-       In `process.c`, `scheduler_schedule` returned `struct registers*`.
-       
-       Wait, `irq_handler` called `timer_callback`.
-       
-       If I want scheduler to work, I need to match 32-bit logic.
-       In 32-bit `irq_common_stub`:
-       call irq_handler
-       mov %eax, %esp  <-- It expected return value!
-       
-       I need to check `irq_handler` signature.
-    */
+    /* Align stack to 16 bytes for C call */
+    movq %rsp, %rax
+    pushq %rax
+    andq $-16, %rsp
     
-    /* Restore */
+    call irq_handler
+    
+    /* RAX now contains the (potentially new) registers pointer.
+       We need to carefully restore the stack pointer.
+       If task switching occurred, the returned RAX is the new RSP.
+    */
+    movq %rax, %rsp
+
     popq %rax
     popq %r15
     popq %r14
@@ -243,7 +233,14 @@ syscall_common_stub:
 
     movq %rsp, %rdi
     
+    /* Align stack to 16 bytes for C call */
+    movq %rsp, %rax
+    pushq %rax
+    andq $-16, %rsp
+    
     call syscall_handler
+    
+    popq %rsp
     /* syscall_handler returned new ESP in 32-bit.
        Here it should return new RSP?
        

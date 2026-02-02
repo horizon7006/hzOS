@@ -2,7 +2,8 @@
 #include "../drivers/vesa.h"
 #include "../gui/font.h"
 
-static uint16_t* const VIDEO_MEMORY = (uint16_t*)0xB8000;
+extern uint64_t g_hhdm_offset;
+static uint16_t* VIDEO_MEMORY = 0; // Will be set in terminal_init
 static const int VGA_WIDTH = 80;
 static const int VGA_HEIGHT = 25;
 
@@ -46,15 +47,17 @@ void terminal_setcolor(uint8_t color) {
 }
 
 void terminal_clear(void) {
+    if (!VIDEO_MEMORY) return; // Not initialized yet
     for (int y = 0; y < VGA_HEIGHT; y++) {
         for (int x = 0; x < VGA_WIDTH; x++) {
             VIDEO_MEMORY[y * VGA_WIDTH + x] = vga_entry(' ', terminal_color);
         }
     }
     
-    if (vesa_video_memory) {
-        vesa_clear(0x00000000); // Black background for boot log
-    }
+    // Skip VESA clear - framebuffer might not be properly mapped
+    // if (vesa_video_memory) {
+    //     vesa_clear(0x00000000); // Black background for boot log
+    // }
 
     terminal_row = 0;
     terminal_column = 0;
@@ -83,6 +86,7 @@ static void vesa_scroll(void) {
 }
 
 void terminal_init(void) {
+    VIDEO_MEMORY = (uint16_t*)(0xB8000 + g_hhdm_offset);
     terminal_setcolor(0x0F);
     terminal_clear();
 }

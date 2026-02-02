@@ -60,6 +60,9 @@ void pci_config_write_word(uint8_t bus, uint8_t device, uint8_t func, uint8_t of
 void pci_config_write_dword(uint8_t bus, uint8_t device, uint8_t func, uint8_t offset, uint32_t value);
 uint8_t pci_config_read_byte(uint8_t bus, uint8_t device, uint8_t func, uint8_t offset);
 
+#define PCI_CLASS_MULTIMEDIA     0x04
+#define PCI_SUBCLASS_HDA         0x03
+
 /* Find device by vendor and device ID */
 pci_device_t* pci_find_device(uint16_t vendor_id, uint16_t device_id);
 

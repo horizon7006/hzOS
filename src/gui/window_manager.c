@@ -65,7 +65,7 @@ window_t *wm_create_window(int x, int y, int w, int h, const char *title) {
   win->y = y;
   win->width = w;
   win->height = h;
-  win->bg_color = WIN7_WINDOW_BG;
+  win->bg_color = NEBULA_GLASS;
   win->flags = 0;
 
   char *d = win->title;
@@ -233,47 +233,41 @@ static void buf_draw_string(uint32_t *buf, int x, int y, const char *str,
   gfx_draw_string_to_buffer(buf, x, y, vesa_width, vesa_height, str, color);
 }
 
-static void buf_fill_rect(uint32_t *buf, int x, int y, int w, int h,
-                          uint32_t color) {
-  gfx_fill_rect_to_buffer(buf, x, y, w, h, vesa_width, vesa_height, color);
-}
 
 static void draw_desktop_elements(uint32_t *buf) {
-  int total = vesa_width * vesa_height;
-  for (int i = 0; i < total; i++)
-    buf[i] = WIN7_BG_COLOR;
+  // 1. Nebula Gradient Background
+  gfx_draw_gradient_to_buffer(buf, 0, 0, vesa_width, vesa_height, vesa_width, vesa_height, NEBULA_BG_TOP, NEBULA_BG_BOTTOM, 1);
 
-  buf_fill_rect(buf, 20, 20, 32, 32, 0xFFFFFFFF);
-  buf_draw_char(buf, 30, 30, 'N', 0xFF000000);
-  buf_draw_string(buf, 15, 55, "Notepad", COLOR_WHITE);
+  // 2. Desktop Icons (Simplified/Modern)
+  // Notepad
+  gfx_fill_rounded_rect_to_buffer(buf, 20, 20, 48, 48, 8, vesa_width, vesa_height, 0x33FFFFFF);
+  buf_draw_char(buf, 40, 40, 'N', NEBULA_ACCENT);
+  buf_draw_string(buf, 20, 75, "Notepad", NEBULA_TEXT);
 
-  buf_fill_rect(buf, 20, 90, 32, 32, 0xFF000000);
-  buf_draw_string(buf, 22, 100, ">_", 0xFF00FF00);
-  buf_draw_string(buf, 15, 125, "Terminal", COLOR_WHITE);
+  // Terminal
+  gfx_fill_rounded_rect_to_buffer(buf, 20, 110, 48, 48, 8, vesa_width, vesa_height, 0x33000000);
+  buf_draw_string(buf, 32, 130, ">_", 0xFF00FF00);
+  buf_draw_string(buf, 18, 165, "Terminal", NEBULA_TEXT);
 
-  buf_fill_rect(buf, 20, 160, 32, 32, 0xFF0000FF);
-  buf_draw_char(buf, 32, 170, '?', 0xFFFFFFFF);
-  buf_draw_string(buf, 20, 195, "About", COLOR_WHITE);
+  // About
+  gfx_fill_rounded_rect_to_buffer(buf, 20, 200, 48, 48, 8, vesa_width, vesa_height, 0x3300D2FF);
+  buf_draw_char(buf, 40, 220, '?', COLOR_WHITE);
+  buf_draw_string(buf, 25, 255, "About", NEBULA_TEXT);
 
-  int tb_height = 40;
+  // 3. Modern Glass Taskbar
+  int tb_height = 48;
   int tb_y = vesa_height - tb_height;
+  gfx_fill_rect_to_buffer(buf, 0, tb_y, vesa_width, tb_height, vesa_width, vesa_height, NEBULA_GLASS);
 
-  buf_fill_rect(buf, 0, tb_y, vesa_width, tb_height, 0xFF202020);
+  // Start Button (Circle)
+  int start_x = 10;
+  int start_y = tb_y + 8;
+  int start_size = 32;
+  gfx_fill_rounded_rect_to_buffer(buf, start_x, start_y, start_size, start_size, 16, vesa_width, vesa_height, 
+                                  start_menu_open ? NEBULA_ACCENT : 0x66FFFFFF);
+  buf_draw_string(buf, start_x + 8, start_y + 12, "hz", COLOR_WHITE);
 
-  int start_x = 5;
-  int start_y = tb_y + 5;
-  int start_w = 40;
-  int start_h = 30;
-
-  uint32_t outline_col = start_menu_open ? 0xFF00FF00 : 0xFFFFFFFF;
-
-  buf_fill_rect(buf, start_x, start_y, start_w, 2, outline_col);
-  buf_fill_rect(buf, start_x, start_y + start_h - 2, start_w, 2, outline_col);
-  buf_fill_rect(buf, start_x, start_y, 2, start_h, outline_col);
-  buf_fill_rect(buf, start_x + start_w - 2, start_y, 2, start_h, outline_col);
-
-  buf_draw_string(buf, start_x + 12, start_y + 11, "hz", outline_col);
-
+  // Time and Layout (Right side)
   rtc_time_t t;
   rtc_read(&t);
   char time_str[16];
@@ -283,27 +277,25 @@ static void draw_desktop_elements(uint32_t *buf) {
   time_str[3] = '0' + (t.minute / 10);
   time_str[4] = '0' + (t.minute % 10);
   time_str[5] = 0;
-  buf_draw_string(buf, vesa_width - 60, tb_y + 16, time_str, COLOR_WHITE);
+  buf_draw_string(buf, vesa_width - 70, tb_y + 18, time_str, NEBULA_TEXT);
 
-  // Layout Indicator
   kb_layout_t layout = keyboard_get_layout();
   const char *layout_str = (layout == KB_LAYOUT_TR) ? "TR" : "US";
-  buf_draw_string(buf, vesa_width - 100, tb_y + 16, layout_str, 0xFF00FF00);
+  buf_draw_string(buf, vesa_width - 110, tb_y + 18, layout_str, NEBULA_ACCENT);
 
+  // Taskbar Buttons
   int tb_btn_x = 60;
-  int tb_btn_w = 100;
-  int tb_btn_gap = 5;
-
+  int tb_btn_w = 120;
+  int tb_btn_gap = 8;
   window_t *w = windows;
   while (w) {
-    uint32_t task_col = (w->flags & 1) ? 0xFF404040 : 0xFF606060;
-    buf_fill_rect(buf, tb_btn_x, start_y, tb_btn_w, 30, task_col);
+    uint32_t task_col = (w->flags & 1) ? 0x44FFFFFF : 0x66FFFFFF;
+    gfx_fill_rounded_rect_to_buffer(buf, tb_btn_x, start_y, tb_btn_w, 32, 6, vesa_width, vesa_height, task_col);
 
-    char tmp[10];
-    for (int i = 0; i < 9; i++)
-      tmp[i] = w->title[i];
-    tmp[9] = 0;
-    buf_draw_string(buf, tb_btn_x + 5, start_y + 10, tmp, COLOR_WHITE);
+    char tmp[12];
+    for (int i = 0; i < 11; i++) tmp[i] = w->title[i];
+    tmp[11] = 0;
+    buf_draw_string(buf, tb_btn_x + 10, start_y + 12, tmp, COLOR_WHITE);
 
     tb_btn_x += tb_btn_w + tb_btn_gap;
     w = w->next;
@@ -319,48 +311,40 @@ static void draw_window(uint32_t *buf, window_t *w) {
   int ww = w->width;
   int wh = w->height;
 
-  int title_h = 24;
-  int border = 4;
+  int title_h = 30;
+  int radius = 10;
 
-  int outer_x = wx - border;
-  int outer_y = wy - title_h - border;
-  int outer_w = ww + 2 * border;
-  int outer_h = wh + 2 * border + title_h;
-  uint32_t border_col = 0xFF60A0D0;
+  // Window Background (Glassy Body)
+  gfx_fill_rounded_rect_to_buffer(buf, wx, wy, ww, wh, radius, vesa_width, vesa_height, w->bg_color);
 
-  buf_fill_rect(buf, outer_x, outer_y, outer_w, border, border_col);
-  buf_fill_rect(buf, outer_x, outer_y + outer_h - border, outer_w, border,
-                border_col);
-  buf_fill_rect(buf, outer_x, outer_y, border, outer_h, border_col);
-  buf_fill_rect(buf, outer_x + outer_w - border, outer_y, border, outer_h,
-                border_col);
-  buf_fill_rect(buf, outer_x + border, outer_y + border, ww, title_h,
-                border_col);
+  // Title Bar (Rounded top)
+  gfx_fill_rounded_rect_to_buffer(buf, wx, wy - title_h, ww, title_h + radius, radius, vesa_width, vesa_height, NEBULA_TITLE_BAR);
+  // Cover the bottom rounding of the title bar to make it "connected"
+  gfx_fill_rect_to_buffer(buf, wx, wy - title_h + radius, ww, radius, vesa_width, vesa_height, NEBULA_TITLE_BAR);
 
-  buf_draw_string(buf, outer_x + 6, outer_y + 6, w->title, COLOR_WHITE);
+  // Window Border (Thin/Clean)
+  // gfx_draw_rounded_rect_to_buffer(buf, wx, wy - title_h, ww, wh + title_h, radius, vesa_width, vesa_height, 0x33FFFFFF);
 
-  int btn_size = 14;
-  int btn_y = outer_y + 5;
-  int btn_x = outer_x + outer_w - 20;
+  buf_draw_string(buf, wx + 12, wy - title_h + 10, w->title, COLOR_WHITE);
 
-  buf_fill_rect(buf, btn_x, btn_y, btn_size, btn_size, 0xFFE04040);
-  buf_draw_string(buf, btn_x + 3, btn_y + 3, "X", COLOR_WHITE);
+  // Cleaner Buttons
+  int btn_r = 6;
+  int btn_y = wy - title_h + 7;
+  int btn_x = wx + ww - 24;
 
-  btn_x -= 20;
-  buf_fill_rect(buf, btn_x, btn_y, btn_size, btn_size, 0xFF4040E0);
-
-  btn_x -= 20;
-  buf_fill_rect(buf, btn_x, btn_y, btn_size, btn_size, 0xFF40E040);
-  buf_draw_string(buf, btn_x + 3, btn_y + 3, "_", COLOR_WHITE);
+  // Close
+  gfx_fill_rounded_rect_to_buffer(buf, btn_x, btn_y, 16, 16, btn_r, vesa_width, vesa_height, 0xFFFF4B4B);
+  
+  // Minimize
+  btn_x -= 24;
+  gfx_fill_rounded_rect_to_buffer(buf, btn_x, btn_y, 16, 16, btn_r, vesa_width, vesa_height, 0xFFFFB86C);
 
   if (w->on_paint) {
-    /* Kernel-mode app with paint callback */
     wm_prepare_window_drawing(w);
     w->on_paint(w, buf, vesa_width, vesa_height);
   }
   
   if (w->surface) {
-    // Blit userland surface to backbuffer
     for (int y = 0; y < wh; y++) {
       if (wy + y < 0 || wy + y >= vesa_height)
         continue;
@@ -370,22 +354,27 @@ static void draw_window(uint32_t *buf, window_t *w) {
 }
 
 static void draw_start_menu(uint32_t *buf) {
-  int m_w = 120;
-  int m_h = 125;
-  int m_x = 0;
-  int m_y = vesa_height - 40 - m_h;
+  int m_w = 180;
+  int m_h = 200;
+  int m_x = 10;
+  int m_y = vesa_height - 54 - m_h;
 
-  buf_fill_rect(buf, m_x, m_y, m_w, m_h, 0xFF303030);
-  buf_fill_rect(buf, m_x + m_w, m_y, 2, m_h, 0xFF606060);
-  buf_fill_rect(buf, m_x, m_y - 2, m_w + 2, 2, 0xFF606060);
+  gfx_fill_rounded_rect_to_buffer(buf, m_x, m_y, m_w, m_h, 12, vesa_width, vesa_height, NEBULA_GLASS);
+  
+  int item_h = 32;
+  int padding = 10;
 
-  int item_h = 25;
+  buf_draw_string(buf, m_x + padding, m_y + 15, "🚀 Applications", NEBULA_ACCENT);
+  
+  buf_draw_string(buf, m_x + 20, m_y + 15 + item_h, "Notepad", NEBULA_TEXT);
+  buf_draw_string(buf, m_x + 20, m_y + 15 + item_h * 2, "Terminal", NEBULA_TEXT);
+  buf_draw_string(buf, m_x + 20, m_y + 15 + item_h * 3, "About", NEBULA_TEXT);
+  
+  // Separator
+  gfx_fill_rect_to_buffer(buf, m_x + padding, m_y + 15 + item_h * 4, m_w - 2 * padding, 1, vesa_width, vesa_height, 0x33FFFFFF);
 
-  buf_draw_string(buf, m_x + 10, m_y + 8, "Notepad", 0xFFFFFFFF);
-  buf_draw_string(buf, m_x + 10, m_y + 8 + item_h, "Terminal", 0xFFFFFFFF);
-  buf_draw_string(buf, m_x + 10, m_y + 8 + item_h * 2, "About", 0xFFFFFFFF);
-  buf_draw_string(buf, m_x + 10, m_y + 8 + item_h * 3, "Restart", 0xFFFFFF00);
-  buf_draw_string(buf, m_x + 10, m_y + 8 + item_h * 4, "Shutdown", 0xFFFFA0A0);
+  buf_draw_string(buf, m_x + 20, m_y + 25 + item_h * 4, "Restart", 0xFF66FF66);
+  buf_draw_string(buf, m_x + 20, m_y + 25 + item_h * 5, "Power Off", 0xFFFF6666);
 }
 
 static void draw_cursor(uint32_t *buf, int mx, int my) {
@@ -434,11 +423,13 @@ void wm_draw() {
 
   draw_cursor(backbuffer, mouse_x, mouse_y);
   if (vesa_video_memory) {
-    uint32_t *dst = (uint32_t *)vesa_video_memory;
+    uint8_t *dst_base = (uint8_t *)vesa_video_memory;
     uint32_t *src = backbuffer;
-    int total_pixels = vesa_width * vesa_height;
-    for (int i = 0; i < total_pixels; i++) {
-      dst[i] = src[i];
+    for (int y = 0; y < vesa_height; y++) {
+      uint32_t *dst_row = (uint32_t *)(dst_base + y * vesa_pitch);
+      for (int x = 0; x < vesa_width; x++) {
+        dst_row[x] = src[y * vesa_width + x];
+      }
     }
   }
 }
@@ -472,56 +463,43 @@ void wm_update() {
   if (mouse_l && !prev_mouse_l) {
     prev_mouse_l = mouse_l;
 
-    int tb_height = 40;
-    int tb_y = vesa_height - tb_height;
-    int start_x = 5;
-    int start_y = tb_y + 5;
+    int tb_y = vesa_height - 48;
+    int start_x = 10;
+    int start_y = tb_y + 8;
+    int start_size = 32;
 
-    if (mouse_x >= start_x && mouse_x < start_x + 40 && mouse_y >= start_y &&
-        mouse_y < start_y + 30) {
+    if (mouse_x >= start_x && mouse_x < start_x + start_size && mouse_y >= start_y &&
+        mouse_y < start_y + start_size) {
       start_menu_open = !start_menu_open;
       return;
     }
 
     if (start_menu_open) {
-      int m_w = 120;
-      int m_h = 125;
-      int m_x = 0;
-      int m_y = vesa_height - 40 - m_h;
+      int m_w = 180;
+      int m_h = 200;
+      int m_x = 10;
+      int m_y = vesa_height - 54 - m_h;
 
       if (mouse_x >= m_x && mouse_x < m_x + m_w && mouse_y >= m_y &&
           mouse_y < m_y + m_h) {
-        int rel_y = mouse_y - m_y;
-        int item_idx = rel_y / 25;
+        int rel_y = mouse_y - (m_y + 15);
+        int item_idx = rel_y / 32;
 
-        // We'll use a helper to launch apps from the GUI
-        // For now, let's assume we have a way to run them.
-        // Since this is single-tasking, it will block the WM.
-        // We'll need a better process manager eventually.
-        if (item_idx == 0) {
+        if (item_idx == 1) {
           notepad_create();
-        } else if (item_idx == 1) {
-          terminal_app_create();
         } else if (item_idx == 2) {
-          about_create();
+          terminal_app_create();
         } else if (item_idx == 3) {
+          about_create();
+        } else if (item_idx == 4) {
           /* Restart */
           outb(0x64, 0xFE);
           asm volatile("hlt");
-        } else if (item_idx == 4) {
-          /* Shutdown */
+        } else if (item_idx == 5) {
+          /* Shutdown (Adjusted for separator index) */
           asm volatile("cli");
-
-          // Try multiple shutdown methods
-          outw(0x604, 0x2000);  // QEMU
-          outw(0xB004, 0x2000); // Bochs
-          outw(0x4004, 0x3400); // VirtualBox
-          outw(0x1004, 0x2000); // ACPI PM1a
-          outw(0x404, 0x2000);  // ACPI PM1a alternate
-
-          // If still running, halt
-          while (1)
-            asm volatile("hlt");
+          outw(0x604, 0x2000); // QEMU
+          while (1) asm volatile("hlt");
         }
         start_menu_open = 0;
         return;
@@ -538,12 +516,11 @@ void wm_update() {
         continue;
       }
 
-      int title_h = 24;
-      int border = 4;
-      int ox = w->x - border;
-      int oy = w->y - title_h - border;
-      int ow = w->width + 2 * border;
-      int oh = w->height + 2 * border + title_h;
+      int title_h = 30;
+      int ox = w->x;
+      int oy = w->y - title_h;
+      int ow = w->width;
+      int oh = w->height + title_h;
 
       if (mouse_x >= ox && mouse_x < ox + ow && mouse_y >= oy &&
           mouse_y < oy + oh) {
@@ -559,15 +536,14 @@ void wm_update() {
           wm_push_event(w, ev);
         }
 
-        int btn_size = 14;
-        int btn_y = oy + 5;
-        int btn_x = ox + ow - 20;
+        int btn_y = oy + 7;
+        int btn_x = ox + ow - 24;
 
-        if (mouse_x >= btn_x && mouse_x < btn_x + btn_size &&
-            mouse_y >= btn_y && mouse_y < btn_y + btn_size) {
+        if (mouse_x >= btn_x && mouse_x < btn_x + 16 &&
+            mouse_y >= btn_y && mouse_y < btn_y + 16) {
           wm_remove_window(w);
-        } else if (mouse_x >= btn_x - 40 && mouse_x < btn_x - 40 + btn_size &&
-                   mouse_y >= btn_y && mouse_y < btn_y + btn_size) {
+        } else if (mouse_x >= btn_x - 24 && mouse_x < btn_x - 24 + 16 &&
+                   mouse_y >= btn_y && mouse_y < btn_y + 16) {
           w->flags |= 1;
         } else if (mouse_y < w->y) {
           dragging_window = w;
@@ -594,11 +570,13 @@ void wm_update() {
           keyboard_set_layout((layout == KB_LAYOUT_US) ? KB_LAYOUT_TR
                                                        : KB_LAYOUT_US);
         } else {
+          int tb_y = vesa_height - 48;
           int tb_btn_x = 60;
-          int tb_btn_w = 100;
+          int tb_btn_w = 120;
+          int tb_btn_gap = 8;
           w = windows;
           while (w) {
-            if (mouse_x >= tb_btn_x && mouse_x < tb_btn_x + tb_btn_w) {
+            if (mouse_x >= tb_btn_x && mouse_x < tb_btn_x + tb_btn_w && mouse_y >= tb_y) {
               if (w->flags & 1) {
                 w->flags &= ~1;
                 wm_focus_window(w);
@@ -612,7 +590,7 @@ void wm_update() {
               }
               break;
             }
-            tb_btn_x += tb_btn_w + 5;
+            tb_btn_x += tb_btn_w + tb_btn_gap;
             w = w->next;
           }
         }
@@ -620,9 +598,9 @@ void wm_update() {
         if (mouse_x >= 20 && mouse_x < 20 + 32) {
           if (mouse_y >= 20 && mouse_y < 20 + 32) {
             notepad_create();
-          } else if (mouse_y >= 90 && mouse_y < 90 + 32) {
+          } else if (mouse_y >= 110 && mouse_y < 110 + 32) {
             terminal_app_create();
-          } else if (mouse_y >= 160 && mouse_y < 160 + 32) {
+          } else if (mouse_y >= 200 && mouse_y < 200 + 32) {
             about_create();
           }
         }

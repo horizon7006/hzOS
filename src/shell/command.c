@@ -8,6 +8,8 @@
 #include "../core/elf.h"
 #include "../core/process.h"
 #include "../drivers/ahci.h"
+#include "../drivers/hda.h"
+#include "memory.h"
 #include "../net/net.h"
 
 typedef struct {
@@ -42,6 +44,7 @@ static void cmd_disktest(const char* args);
 static void cmd_diskinfo(const char* args);
 static void cmd_netinfo(const char* args);
 static void cmd_ping(const char* args);
+static void cmd_soundtest(const char* args);
 
 static command_entry_t commands[] = {
     { "help",        "Show available commands",       cmd_help        },
@@ -70,6 +73,7 @@ static command_entry_t commands[] = {
     { "diskinfo",   "Show AHCI disk identifying info", cmd_diskinfo   },
     { "netinfo",    "Show network interface info",   cmd_netinfo    },
     { "ping",       "Send ARP request to test reachability", cmd_ping },
+    { "soundtest",  "Test audio playback (freq duration)", cmd_soundtest },
 };
 
 static const size_t command_count = sizeof(commands) / sizeof(commands[0]);
@@ -141,7 +145,7 @@ static void cmd_clear(const char* args) {
 static void cmd_about(const char* args) {
     (void)args;
     terminal_writeln("hzOS: tiny hobby kernel with a toy shell and in-memory FS.");
-    terminal_writeln("Build info: simple 32-bit x86, BIOS, Multiboot.");
+    terminal_writeln("Arch: x86_64 Long Mode, SMP Enable.");
 }
 
 static void cmd_osfetch(const char* args) {
@@ -501,9 +505,6 @@ static void cmd_disktest(const char* args) {
     HBA_PORT* port = ahci_get_port(0);
     kprintf("disktest: reading LBA 0 from port %d...\n", 0);
 
-    // Buffer for one sector (512 bytes = 256 words)
-    // Needs to be kmalloc'd if we want it to be safely aligned/accessible by AHCI DMA
-    // (though for 512 bytes it might be okay on stack, best to be safe)
     static uint16_t sector_buf[256];
     memset(sector_buf, 0, 512);
 
@@ -534,8 +535,6 @@ static void cmd_diskinfo(const char* args) {
 
     if (ahci_identify(port, info_buf) == 0) {
         kprintf("diskinfo: identification successful!\n");
-        
-        // Model number is at words 27-46
         char model[41];
         for (int i = 0; i < 20; i++) {
             uint16_t w = info_buf[27 + i];
@@ -544,11 +543,8 @@ static void cmd_diskinfo(const char* args) {
         }
         model[40] = '\0';
         kprintf("Model: %s\n", model);
-
-        // LBA48 support at word 83 bit 10
         if (info_buf[83] & (1 << 10)) {
             kprintf("Support: LBA48\n");
-            // Capacity at words 100-103
             uint32_t sectors_low = info_buf[100] | ((uint32_t)info_buf[101] << 16);
             kprintf("Capacity (sectors): %d\n", sectors_low);
         } else {
@@ -589,5 +585,27 @@ static void cmd_ping(const char* args) {
     uint32_t target_ip = htonl((a << 24) | (b << 16) | (c << 8) | d);
     kprintf("ARP PING %d.%d.%d.%d...\n", a, b, c, d);
     arp_send_request(target_ip);
+}
+
+static void cmd_soundtest(const char* args) {
+    uint32_t freq = 440;
+    uint32_t duration = 1000;
+
+    if (args && *args) {
+        const char* p = args;
+        while (*p == ' ') p++;
+        if (*p >= '0' && *p <= '9') {
+            freq = 0;
+            while (*p >= '0' && *p <= '9') freq = freq * 10 + (*p++ - '0');
+        }
+        while (*p == ' ') p++;
+        if (*p >= '0' && *p <= '9') {
+            duration = 0;
+            while (*p >= '0' && *p <= '9') duration = duration * 10 + (*p++ - '0');
+        }
+    }
+
+    kprintf("Soundtest: %d Hz for %d ms\n", freq, duration);
+    hda_play_sine(freq, duration);
 }
 
