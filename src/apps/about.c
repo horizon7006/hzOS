@@ -15,7 +15,7 @@ static void about_paint(window_t *win, uint32_t *buf, int stride, int height) {
   wm_draw_string(win, 60, 20, "hzOS", 0xFFFFFFFF);
 
   /* Version */
-  wm_draw_string(win, 40, 45, "Beta Build 2", 0xFFAACCFF);
+  wm_draw_string(win, 40, 45, "Beta 2.1", 0xFFAACCFF);
 
   /* Description */
   wm_draw_string(win, 20, 75, "An x64 hobby OS", 0xFFCCCCCC);
@@ -23,9 +23,6 @@ static void about_paint(window_t *win, uint32_t *buf, int stride, int height) {
 
   /* Credits */
   wm_draw_string(win, 20, 120, "Created by Horizon", 0xFF88FF88);
-
-  /* Fun message */
-  wm_draw_string(win, 20, 150, "Made with love <3", 0xFFFF8888);
 }
 
 void about_create(void) {

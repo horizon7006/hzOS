@@ -15,6 +15,8 @@
 #include "../apps/about.h"
 #include "../apps/notepad.h"
 #include "../apps/terminal_app.h"
+#include "../apps/calculator.h"
+#include "../apps/usagemgr.h"
 #include "../fs/filesystem.h"
 
 static uint32_t *backbuffer = 0;
@@ -23,10 +25,17 @@ static int mouse_x = 0;
 static int mouse_y = 0;
 static int mouse_l = 0;
 static int prev_mouse_l = 0;
+static int mouse_r = 0; // Added
+static int prev_mouse_r = 0; // Added
 
 static window_t *dragging_window = 0;
 static int drag_off_x = 0;
 static int drag_off_y = 0;
+
+static int desktop_ctx_menu_open = 0; // Added
+static int ctx_x = 0;                 // Added
+static int ctx_y = 0;                 // Added
+
 static int start_menu_open = 0;
 static int wm_running = 1;
 
@@ -254,6 +263,16 @@ static void draw_desktop_elements(uint32_t *buf) {
   buf_draw_char(buf, 40, 220, '?', COLOR_WHITE);
   buf_draw_string(buf, 25, 255, "About", NEBULA_TEXT);
 
+  // Calculator
+  gfx_fill_rounded_rect_to_buffer(buf, 20, 290, 48, 48, 8, vesa_width, vesa_height, 0x33FF8800);
+  buf_draw_string(buf, 32, 310, "+-", COLOR_WHITE);
+  buf_draw_string(buf, 28, 345, "Calc", NEBULA_TEXT);
+
+  // Usage Manager
+  gfx_fill_rounded_rect_to_buffer(buf, 20, 380, 48, 48, 8, vesa_width, vesa_height, 0x33AA55FF);
+  buf_draw_char(buf, 40, 400, '%', COLOR_WHITE);
+  buf_draw_string(buf, 10, 435, "Usage Mgr", NEBULA_TEXT);
+
   // 3. Modern Glass Taskbar
   int tb_height = 48;
   int tb_y = vesa_height - tb_height;
@@ -359,22 +378,19 @@ static void draw_start_menu(uint32_t *buf) {
   int m_x = 10;
   int m_y = vesa_height - 54 - m_h;
 
-  gfx_fill_rounded_rect_to_buffer(buf, m_x, m_y, m_w, m_h, 12, vesa_width, vesa_height, NEBULA_GLASS);
-  
-  int item_h = 32;
-  int padding = 10;
+  wm_fill_rect(NULL, m_x, m_y, m_w, m_h, 0xDD202020);
 
-  buf_draw_string(buf, m_x + padding, m_y + 15, "🚀 Applications", NEBULA_ACCENT);
-  
-  buf_draw_string(buf, m_x + 20, m_y + 15 + item_h, "Notepad", NEBULA_TEXT);
-  buf_draw_string(buf, m_x + 20, m_y + 15 + item_h * 2, "Terminal", NEBULA_TEXT);
-  buf_draw_string(buf, m_x + 20, m_y + 15 + item_h * 3, "About", NEBULA_TEXT);
-  
-  // Separator
-  gfx_fill_rect_to_buffer(buf, m_x + padding, m_y + 15 + item_h * 4, m_w - 2 * padding, 1, vesa_width, vesa_height, 0x33FFFFFF);
+  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 1, "Notepad", 0xFFFFFFFF);
+  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 2, "Terminal", 0xFFFFFFFF);
+  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 3, "Calculator", 0xFFFFFFFF);
+  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 4, "Usage Mgr", 0xFFFFFFFF);
+  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 5, "About hzOS", 0xFFFFFFFF);
 
-  buf_draw_string(buf, m_x + 20, m_y + 25 + item_h * 4, "Restart", 0xFF66FF66);
-  buf_draw_string(buf, m_x + 20, m_y + 25 + item_h * 5, "Power Off", 0xFFFF6666);
+  /* Separator */
+  wm_fill_rect(NULL, m_x + 10, m_y + 15 + 32 * 6 - 8, m_w - 20, 1, 0xFF404040);
+
+  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 6, "Restart", 0xFFFF5555);
+  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 7, "Shutdown", 0xFFFF5555);
 }
 
 static void draw_cursor(uint32_t *buf, int mx, int my) {
@@ -421,6 +437,18 @@ void wm_draw() {
     draw_start_menu(backbuffer);
   }
 
+  if (desktop_ctx_menu_open) {
+    int m_w = 150;
+    int m_h = 135;
+    wm_fill_rect(NULL, ctx_x, ctx_y, m_w, m_h, 0xEE303030);
+    
+    wm_draw_string(NULL, ctx_x + 10, ctx_y + 15 + 24 * 0, "Terminal", 0xFFFFFFFF);
+    wm_draw_string(NULL, ctx_x + 10, ctx_y + 15 + 24 * 1, "Notepad", 0xFFFFFFFF);
+    wm_draw_string(NULL, ctx_x + 10, ctx_y + 15 + 24 * 2, "Calculator", 0xFFFFFFFF);
+    wm_draw_string(NULL, ctx_x + 10, ctx_y + 15 + 24 * 3, "Usage Mgr", 0xFFFFFFFF);
+    wm_draw_string(NULL, ctx_x + 10, ctx_y + 15 + 24 * 4, "Refresh", 0xFFFFFFFF);
+  }
+
   draw_cursor(backbuffer, mouse_x, mouse_y);
   if (vesa_video_memory) {
     uint8_t *dst_base = (uint8_t *)vesa_video_memory;
@@ -439,6 +467,8 @@ void wm_update() {
   mouse_x = s.x;
   mouse_y = s.y;
   mouse_l = s.left_down;
+  int mouse_r = s.right_down;
+  static int prev_mouse_r = 0;
 
   if (mouse_x < 0)
     mouse_x = 0;
@@ -460,8 +490,52 @@ void wm_update() {
     return;
   }
 
+  if (mouse_r && !prev_mouse_r) {
+    // Only open context menu if we didn't click on an active window
+    // For simplicity, just check if we're below the taskbar or on an icon later
+    // but right now, just open it anywhere. We have overlapping z-order checks.
+    int hit_w = 0;
+    window_t *w = windows;
+    while(w) {
+        if (!(w->flags & 1)) {
+            if (mouse_x >= w->x && mouse_x < w->x + w->width &&
+                mouse_y >= w->y - 30 && mouse_y < w->y + w->height) {
+                hit_w = 1; 
+                break;
+            }
+        }
+        w = w->next;
+    }
+    if (!hit_w) {
+      desktop_ctx_menu_open = 1;
+      ctx_x = mouse_x;
+      ctx_y = mouse_y;
+      // Prevent going off-screen
+      if (ctx_x + 150 > vesa_width) ctx_x = vesa_width - 150;
+      if (ctx_y + 135 > vesa_height) ctx_y = vesa_height - 135;
+      start_menu_open = 0;
+    }
+  }
+  prev_mouse_r = mouse_r;
+
   if (mouse_l && !prev_mouse_l) {
     prev_mouse_l = mouse_l;
+
+    if (desktop_ctx_menu_open) {
+      int m_w = 150;
+      int m_h = 135;
+      if (mouse_x >= ctx_x && mouse_x < ctx_x + m_w && mouse_y >= ctx_y && mouse_y < ctx_y + m_h) {
+          int rel_y = mouse_y - (ctx_y + 5);
+          int item_idx = rel_y / 24;
+          if (item_idx == 0) terminal_app_create();
+          else if (item_idx == 1) notepad_create();
+          else if (item_idx == 2) calculator_create();
+          else if (item_idx == 3) usagemgr_create();
+          else if (item_idx == 4) { /* Refresh */ }
+      }
+      desktop_ctx_menu_open = 0;
+      return; // consume click
+    }
 
     int tb_y = vesa_height - 48;
     int start_x = 10;
@@ -490,12 +564,16 @@ void wm_update() {
         } else if (item_idx == 2) {
           terminal_app_create();
         } else if (item_idx == 3) {
-          about_create();
+          calculator_create();
         } else if (item_idx == 4) {
+          usagemgr_create();
+        } else if (item_idx == 5) {
+          about_create();
+        } else if (item_idx == 6) {
           /* Restart */
           outb(0x64, 0xFE);
           asm volatile("hlt");
-        } else if (item_idx == 5) {
+        } else if (item_idx == 7) {
           /* Shutdown (Adjusted for separator index) */
           asm volatile("cli");
           outw(0x604, 0x2000); // QEMU
@@ -595,13 +673,17 @@ void wm_update() {
           }
         }
       } else {
-        if (mouse_x >= 20 && mouse_x < 20 + 32) {
-          if (mouse_y >= 20 && mouse_y < 20 + 32) {
+        if (mouse_x >= 20 && mouse_x < 20 + 48) {
+          if (mouse_y >= 20 && mouse_y < 20 + 48) {
             notepad_create();
-          } else if (mouse_y >= 110 && mouse_y < 110 + 32) {
+          } else if (mouse_y >= 110 && mouse_y < 110 + 48) {
             terminal_app_create();
-          } else if (mouse_y >= 200 && mouse_y < 200 + 32) {
+          } else if (mouse_y >= 200 && mouse_y < 200 + 48) {
             about_create();
+          } else if (mouse_y >= 290 && mouse_y < 290 + 48) {
+            calculator_create();
+          } else if (mouse_y >= 380 && mouse_y < 380 + 48) {
+            usagemgr_create();
           }
         }
       }

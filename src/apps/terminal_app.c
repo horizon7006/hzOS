@@ -10,38 +10,108 @@
 #define TERM_COLS 52
 #define MAX_CMD 64
 
+#define DEFAULT_FG 0xFF00FF00
+#define DEFAULT_BG 0xCC000000
+
 typedef struct {
   char screen[TERM_ROWS][TERM_COLS + 1];
+  uint32_t colors[TERM_ROWS][TERM_COLS];
   int cursor_row;
   int cursor_col;
   char cmd_line[MAX_CMD];
   int cmd_len;
   window_t *win;
+  
+  // ANSI parsing state
+  int in_escape;
+  char escape_buf[16];
+  int escape_len;
+  uint32_t current_color;
 } terminal_app_state_t;
 
 /* Global pointer for the sink callback */
 static terminal_app_state_t *active_terminal = 0;
 
+static const uint32_t ansi_colors[] = {
+    0xFF000000, // 30 Black
+    0xFFCC0000, // 31 Red
+    0xFF4E9A06, // 32 Green
+    0xFFC4A000, // 33 Yellow
+    0xFF3465A4, // 34 Blue
+    0xFF75507B, // 35 Magenta
+    0xFF06989A, // 36 Cyan
+    0xFFD3D7CF  // 37 White
+};
+
 static void term_scroll(terminal_app_state_t *state) {
   for (int i = 0; i < TERM_ROWS - 1; i++) {
     for (int j = 0; j < TERM_COLS; j++) {
       state->screen[i][j] = state->screen[i + 1][j];
+      state->colors[i][j] = state->colors[i + 1][j];
     }
   }
   for (int j = 0; j < TERM_COLS; j++) {
     state->screen[TERM_ROWS - 1][j] = ' ';
+    state->colors[TERM_ROWS - 1][j] = DEFAULT_FG;
   }
   if (state->cursor_row > 0)
     state->cursor_row--;
 }
 
+static void term_parse_escape(terminal_app_state_t *state) {
+    state->escape_buf[state->escape_len] = 0;
+    // Expected format: "[3Xm" or "[0m"
+    if (state->escape_buf[0] == '[') {
+        int color_code = 0;
+        int i = 1;
+        while (state->escape_buf[i] >= '0' && state->escape_buf[i] <= '9') {
+            color_code = color_code * 10 + (state->escape_buf[i] - '0');
+            i++;
+        }
+        if (state->escape_buf[i] == 'm') {
+            if (color_code == 0) {
+                state->current_color = DEFAULT_FG;
+            } else if (color_code >= 30 && color_code <= 37) {
+                state->current_color = ansi_colors[color_code - 30];
+            } else if (color_code >= 90 && color_code <= 97) {
+                // Bright colors mapped to same set for simplicity, but shifted
+                state->current_color = ansi_colors[color_code - 90] | 0x00555555; 
+            }
+        }
+    }
+}
+
 static void term_putc(terminal_app_state_t *state, char c) {
+  if (state->in_escape) {
+      if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+          // End of escape sequence
+          if (state->escape_len < 15) {
+              state->escape_buf[state->escape_len++] = c;
+          }
+          term_parse_escape(state);
+          state->in_escape = 0;
+      } else {
+          if (state->escape_len < 15) {
+              state->escape_buf[state->escape_len++] = c;
+          }
+      }
+      return;
+  }
+
+  if (c == '\033') { // ESC
+      state->in_escape = 1;
+      state->escape_len = 0;
+      return;
+  }
+
   if (c == '\n' || c == '\r') {
     state->cursor_col = 0;
     state->cursor_row++;
   } else if (c >= 32 && c <= 126) {
     if (state->cursor_col < TERM_COLS) {
-      state->screen[state->cursor_row][state->cursor_col++] = c;
+      state->screen[state->cursor_row][state->cursor_col] = c;
+      state->colors[state->cursor_row][state->cursor_col] = state->current_color;
+      state->cursor_col++;
     }
   }
 
@@ -81,13 +151,18 @@ static void terminal_app_paint(window_t *win, uint32_t *buf, int stride,
 
   /* Draw screen buffer */
   for (int i = 0; i < TERM_ROWS; i++) {
-    state->screen[i][TERM_COLS] = 0;
-    wm_draw_string(win, 4, 4 + i * 10, state->screen[i], 0xFF00FF00);
+    for (int j = 0; j < TERM_COLS; j++) {
+      char c = state->screen[i][j];
+      if (c >= 32 && c <= 126) {
+        char buf[2] = {c, 0};
+        wm_draw_string(win, 4 + j * 8, 4 + i * 10, buf, state->colors[i][j]);
+      }
+    }
   }
 
   /* Draw command line prompt */
   int prompt_y = 4 + TERM_ROWS * 10 + 8;
-  wm_draw_string(win, 4, prompt_y, "> ", 0xFFFFFFFF);
+  wm_draw_string(win, 4, prompt_y, "> ", DEFAULT_FG);
 
   char display_cmd[MAX_CMD + 2];
   int i;
@@ -150,10 +225,11 @@ void terminal_app_create(void) {
   terminal_app_state_t *state =
       (terminal_app_state_t *)kmalloc_z(sizeof(terminal_app_state_t));
 
-  /* Initialize screen buffer with spaces */
+  /* Initialize screen buffer with spaces and colors */
   for (int i = 0; i < TERM_ROWS; i++) {
     for (int j = 0; j < TERM_COLS; j++) {
       state->screen[i][j] = ' ';
+      state->colors[i][j] = DEFAULT_FG;
     }
     state->screen[i][TERM_COLS] = 0;
   }
@@ -163,6 +239,9 @@ void terminal_app_create(void) {
   state->cmd_len = 0;
   state->cmd_line[0] = 0;
   state->win = win;
+  state->in_escape = 0;
+  state->escape_len = 0;
+  state->current_color = DEFAULT_FG;
 
   /* Print welcome message */
   term_puts(state, "hzOS Terminal - Type 'help' for commands\n");

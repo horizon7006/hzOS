@@ -34,10 +34,22 @@ void hpet_init(void) {
 }
 
 void hpet_sleep(uint64_t ms) {
+    /* Safety check: if HPET not initialized, use busy loop fallback */
+    if (g_hpet_base == 0 || g_hpet_period == 0) {
+        /* Fallback: crude busy loop (very approximate, ~1000 cycles per iteration) */
+        volatile uint64_t loops = ms * 100000;
+        while (loops--) {
+            __asm__ volatile("pause");
+        }
+        return;
+    }
     uint64_t target = hpet_read(HPET_REG_MAIN_COUNTER_VALUE) + (ms * 1000000000000ULL) / g_hpet_period;
     while (hpet_read(HPET_REG_MAIN_COUNTER_VALUE) < target);
 }
 
 uint64_t hpet_get_nanos(void) {
+    if (g_hpet_base == 0 || g_hpet_period == 0) {
+        return 0;
+    }
     return (hpet_read(HPET_REG_MAIN_COUNTER_VALUE) * g_hpet_period) / 1000000ULL;
 }

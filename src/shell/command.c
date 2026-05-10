@@ -151,17 +151,11 @@ static void cmd_about(const char* args) {
 static void cmd_osfetch(const char* args) {
     (void)args;
     
-    // ASCII Logo and Info
-    // Design:
-    //   +------+  OS:      hzOS
-    //   |  hz  |  Version: ALPHA A.5
-    //   +------+  Kernel:  hzKernel
-    //             Arch:    i386
 
     kprintf("  +------+  OS:      hzOS\n");
-    kprintf("  |  hz  |  Version: ALPHA A.5\n");
+    kprintf("  |  hz  |  Version: Beta Build 2\n");
     kprintf("  +------+  Kernel:  hzKernel\n");
-    kprintf("            Arch:    i386\n");
+    kprintf("            Arch:    x64 UEFI\n");
     kprintf("\n");
 }
 

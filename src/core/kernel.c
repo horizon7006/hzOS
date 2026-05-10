@@ -138,21 +138,38 @@ static void tty_key_handler(char c) {
 void kernel_main(void) {
   if (hhdm_request.response != NULL) {
     g_hhdm_offset = hhdm_request.response->offset;
+  } else {
+    // HHDM is critical for our memory model
+    serial_printf("CRITICAL: HHDM Request failed. System cannot boot.\n");
+    for(;;) __asm__("hlt");
   }
 
   // Initialize heap using first large usable memory chunk AS EARLY AS POSSIBLE
   int heap_initialized = 0;
+  size_t total_usable_mem_kb = 0;
+  
   if (memmap_request.response != NULL) {
-    // First pass: find a reasonably large chunk (>= 1MB)
-    for (uint64_t i = 0; i < memmap_request.response->entry_count && !heap_initialized; i++) {
+    for (uint64_t i = 0; i < memmap_request.response->entry_count; i++) {
         struct limine_memmap_entry *entry = memmap_request.response->entries[i];
-        if (entry->type == LIMINE_MEMMAP_USABLE && entry->length >= 1*1024*1024) {
+        if (entry->type == LIMINE_MEMMAP_USABLE || entry->type == LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE) {
+            total_usable_mem_kb += (entry->length / 1024);
+        }
+        
+        if (entry->type == LIMINE_MEMMAP_USABLE && entry->length >= 1*1024*1024 && !heap_initialized) {
             uintptr_t heap_base = entry->base + g_hhdm_offset;
-            extern void memory_init(uintptr_t base);
-            memory_init(heap_base);
             heap_initialized = 1;
+            // memory_init called after the loop to ensure we have total_usable_mem_kb computed
+            extern void memory_init(uintptr_t base, size_t total_kb);
+            memory_init(heap_base, 0); // Temporary, we will fix this logic below
         }
     }
+  }
+
+  // Proper heap init call (since memory_init now takes total RAM)
+  if (heap_initialized) {
+      extern void memory_init(uintptr_t base, size_t total_kb);
+      extern uintptr_t get_heap_base(void);
+      memory_init(get_heap_base(), total_usable_mem_kb); 
   }
 
   serial_init();
@@ -226,8 +243,8 @@ void kernel_main(void) {
   kprintf("xhci: initializing usb...\n");
   xhci_init();
 
-  kprintf("hda: initializing...\n");
-  hda_init();
+  // kprintf("hda: initializing...\n");
+  // hda_init();
 
   kprintf("ahci: initializing storage...\n");
   ahci_init();

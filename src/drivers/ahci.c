@@ -1,6 +1,7 @@
 #include "ahci.h"
 #include "pci.h"
 #include "printf.h"
+#include "serial.h"
 #include "memory.h"
 #include "io.h"
 #include "../core/paging.h"
@@ -99,6 +100,27 @@ static int find_cmd_slot(HBA_PORT* port) {
     return -1;
 }
 
+static inline uint64_t ahci_port_clb_phys(HBA_PORT* port) {
+    return ((uint64_t)port->clbu << 32) | port->clb;
+}
+
+static inline uint64_t ahci_cmd_tbl_phys(HBA_CMD_HEADER* cmdhdr) {
+    return ((uint64_t)cmdhdr->ctbau << 32) | cmdhdr->ctba;
+}
+
+static HBA_CMD_HEADER* ahci_get_cmdhdr(HBA_PORT* port, int slot) {
+    uint64_t clb_phys = ahci_port_clb_phys(port);
+    if (!clb_phys || slot < 0 || slot >= 32) return NULL;
+    return (HBA_CMD_HEADER*)PHYS_TO_VIRT(clb_phys) + slot;
+}
+
+static HBA_CMD_TBL* ahci_get_cmdtbl(HBA_CMD_HEADER* cmdhdr) {
+    if (!cmdhdr) return NULL;
+    uint64_t ctba_phys = ahci_cmd_tbl_phys(cmdhdr);
+    if (!ctba_phys) return NULL;
+    return (HBA_CMD_TBL*)PHYS_TO_VIRT(ctba_phys);
+}
+
 void ahci_init(void) {
     serial_printf("ahci: initializing...\n");
 
@@ -129,8 +151,15 @@ void ahci_init(void) {
     command |= (1 << 2); // Bus Master
     pci_config_write_word(ahci_dev->bus, ahci_dev->device, ahci_dev->function, PCI_COMMAND, command);
 
-    // ABAR is at BAR 5. Mask lower bits (flags)
-    uint64_t abar_phys = ahci_dev->bar5 & 0xFFFFFFF0;
+    // ABAR is at BAR 5 (offset 0x24)
+    uint32_t bar5 = pci_config_read_dword(ahci_dev->bus, ahci_dev->device, ahci_dev->function, 0x24);
+    uint64_t abar_phys = bar5 & 0xFFFFFFF0;
+    
+    if ((bar5 & 0x4) == 0x4) { // 64-bit BAR
+        uint32_t bar5_upper = pci_config_read_dword(ahci_dev->bus, ahci_dev->device, ahci_dev->function, 0x28);
+        abar_phys |= ((uint64_t)bar5_upper << 32);
+    }
+
     extern uint64_t g_hhdm_offset;
     abar_phys += g_hhdm_offset;
     
@@ -254,13 +283,15 @@ int ahci_identify(HBA_PORT* port, uint16_t* buf) {
     int slot = find_cmd_slot(port);
     if (slot == -1) return -1;
 
-    HBA_CMD_HEADER* cmdhdr = (HBA_CMD_HEADER*)(port->clb);
-    cmdhdr += slot;
+    HBA_CMD_HEADER* cmdhdr = ahci_get_cmdhdr(port, slot);
+    if (!cmdhdr) return -1;
+
     cmdhdr->cfl = sizeof(FIS_REG_H2D) / sizeof(uint32_t);
     cmdhdr->w = 0;
     cmdhdr->prdtl = 1;
 
-    HBA_CMD_TBL* cmdtbl = (HBA_CMD_TBL*)(cmdhdr->ctba);
+    HBA_CMD_TBL* cmdtbl = ahci_get_cmdtbl(cmdhdr);
+    if (!cmdtbl) return -1;
     memset(cmdtbl, 0, sizeof(HBA_CMD_TBL));
 
     cmdtbl->prdt_entry[0].dba = (uint32_t)VIRT_TO_PHYS(buf);
@@ -299,13 +330,21 @@ int ahci_read(HBA_PORT* port, uint32_t startl, uint32_t starth, uint32_t count, 
         return -1;
     }
 
-    HBA_CMD_HEADER* cmdhdr = (HBA_CMD_HEADER*)(port->clb);
-    cmdhdr += slot;
+    HBA_CMD_HEADER* cmdhdr = ahci_get_cmdhdr(port, slot);
+    if (!cmdhdr) {
+        serial_printf("ahci: invalid command header pointer\n");
+        return -1;
+    }
+
     cmdhdr->cfl = sizeof(FIS_REG_H2D) / sizeof(uint32_t);
     cmdhdr->w = 0;
     cmdhdr->prdtl = (uint16_t)((count - 1) >> 4) + 1;
 
-    HBA_CMD_TBL* cmdtbl = (HBA_CMD_TBL*)(cmdhdr->ctba);
+    HBA_CMD_TBL* cmdtbl = ahci_get_cmdtbl(cmdhdr);
+    if (!cmdtbl) {
+        serial_printf("ahci: invalid command table pointer\n");
+        return -1;
+    }
     // Be careful with memset if prdt_entry count is large, but for 1 sector it's small
     memset(cmdtbl, 0, sizeof(HBA_CMD_TBL) + (cmdhdr->prdtl - 1) * sizeof(HBA_PRDT_ENTRY));
 

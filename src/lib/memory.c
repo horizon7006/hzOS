@@ -3,12 +3,26 @@
 extern uint32_t _end;
 static uintptr_t placement_addr = (uintptr_t)&_end;
 
-void memory_init(uintptr_t base) {
-    placement_addr = base;
-}
-
 uintptr_t get_heap_base(void) {
     return placement_addr;
+}
+
+static size_t g_total_mem_kb = 0;
+static uintptr_t g_heap_start = 0;
+
+void memory_init(uintptr_t base, size_t total_kb) {
+    placement_addr = base;
+    g_heap_start = base;
+    g_total_mem_kb = total_kb;
+}
+
+size_t memory_get_total_kb(void) {
+    return g_total_mem_kb;
+}
+
+size_t memory_get_used_kb(void) {
+    if (g_heap_start == 0) return 0;
+    return (placement_addr - g_heap_start) / 1024;
 }
 
 typedef struct malloc_block {

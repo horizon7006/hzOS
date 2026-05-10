@@ -47,8 +47,43 @@ void hda_init(void) {
 
     kprintf("HDA: Found controller at %02x:%02x.%x\n", pci->bus, pci->device, pci->function);
 
+    // Validate BAR0
+    if (pci->bar0 == 0 || pci->bar0 == 0xFFFFFFFF) {
+        kprintf("HDA: Invalid BAR0, skipping initialization\n");
+        return;
+    }
+
+    // Enable bus mastering and memory space access in PCI command register
+    uint16_t cmd = pci_config_read_word(pci->bus, pci->device, pci->function, 0x04);
+    cmd |= (1 << 1) | (1 << 2); // Memory Space Enable + Bus Master Enable
+    pci_config_write_word(pci->bus, pci->device, pci->function, 0x04, cmd);
+
+    /* Get BAR0 - Handle 64-bit BAR properly */
+    uint32_t bar0 = pci_config_read_dword(pci->bus, pci->device, pci->function, 0x10);
+    uint64_t mmio_base = bar0 & ~0xF;
+    
+    // Check if 64-bit memory space
+    if ((bar0 & 0x4) == 0x4) {
+        uint32_t bar1 = pci_config_read_dword(pci->bus, pci->device, pci->function, 0x14);
+        mmio_base |= ((uint64_t)bar1 << 32);
+    }
+    
+    if (mmio_base == 0) {
+        kprintf("HDA: Invalid MMIO base (0), aborting.\n");
+        return;
+    }
+
     extern uint64_t g_hhdm_offset;
-    g_hda.bar = (pci->bar0 & ~0xF) + g_hhdm_offset;
+    g_hda.bar = mmio_base + g_hhdm_offset;
+    
+    // Sanity check: try to read a register and verify it's not all 1s
+    kprintf("HDA: Checking MMIO at %lx (Phys: %lx)\n", g_hda.bar, mmio_base);
+    uint32_t test = hda_read32(&g_hda, HDA_REG_GCAP);
+    if (test == 0xFFFFFFFF) {
+        kprintf("HDA: MMIO read returned all 1s, hardware not responding\n");
+        return;
+    }
+    
     kprintf("HDA: MMIO at %lx\n", g_hda.bar);
 
     // 1. Reset the controller
@@ -78,6 +113,12 @@ void hda_init(void) {
     // 2. Setup CORB/RIRB
     g_hda.corb = kmalloc_raw_aligned(1024); // 256 * 4 bytes
     g_hda.rirb = kmalloc_raw_aligned(2048); // 256 * 8 bytes
+    
+    if (!g_hda.corb || !g_hda.rirb) {
+        kprintf("HDA: Failed to allocate CORB/RIRB buffers\n");
+        return;
+    }
+    
     g_hda.corb_size_entries = 256;
     g_hda.rirb_size_entries = 256;
     g_hda.corb_wp = 0;

@@ -63,6 +63,8 @@ OBJS := \
   $(BUILDDIR)/notepad.o \
   $(BUILDDIR)/terminal_app.o \
   $(BUILDDIR)/about.o \
+  $(BUILDDIR)/usagemgr.o \
+  $(BUILDDIR)/calculator.o \
   $(BUILDDIR)/upng.o \
   $(BUILDDIR)/pci.o \
   $(BUILDDIR)/ahci.o \
@@ -143,7 +145,7 @@ limine:
 
 iso: $(ISO)
 
-$(ISO): $(KERNEL_ELF) limine.conf grub.cfg | $(BUILDDIR) limine
+$(ISO): $(KERNEL_ELF) limine.conf | $(BUILDDIR) limine
 	@echo "  ISO     $@"
 	$(Q)rm -rf $(ISOROOT)
 	$(Q)mkdir -p $(ISOROOT)/boot
@@ -178,11 +180,10 @@ ifeq ($(wildcard $(OVMF)),)
 endif
 
 run-qemu: $(ISO) hdd.img
-	qemu-system-x86_64 -bios $(OVMF) -cdrom $(ISO) -drive if=none,id=dr1,file=hdd.img -device ich9-ahci,id=ahci -device ide-hd,drive=dr1,bus=ahci.0 -net nic,model=rtl8139 -net user,hostfwd=tcp::8080-:80,hostfwd=udp::8888-:8888 -smp 4 -device intel-hda -device hda-duplex,audiodev=audio0 -audiodev pa,id=audio0
+	qemu-system-x86_64 -bios $(OVMF) -cdrom $(ISO) -drive if=none,id=dr1,file=hdd.img -device ich9-ahci,id=ahci -device ide-hd,drive=dr1,bus=ahci.0 -net nic,model=rtl8139 -net user,hostfwd=tcp::8080-:80,hostfwd=udp::8888-:8888 -smp 4
 
 debug-qemu: $(ISO) hdd.img
-	qemu-system-x86_64 -bios $(OVMF) -cdrom $(ISO) -drive if=none,id=dr1,file=hdd.img -device ich9-ahci,id=ahci -device ide-hd,drive=dr1,bus=ahci.0 -net nic,model=rtl8139 -net user,hostfwd=tcp::8080-:80,hostfwd=udp::8888-:8888 -smp 4 -serial stdio -device intel-hda -device hda-duplex,audiodev=audio0 -audiodev pa,id=audio0
-
+	qemu-system-x86_64 -bios $(OVMF) -cdrom $(ISO) -drive if=none,id=dr1,file=hdd.img -device ich9-ahci,id=ahci -device ide-hd,drive=dr1,bus=ahci.0 -net nic,model=rtl8139 -net user,hostfwd=tcp::8080-:80,hostfwd=udp::8888-:8888 -smp 4 -serial stdio
 clean:
 	rm -rf $(BUILDDIR)
 
