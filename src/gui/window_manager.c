@@ -374,23 +374,25 @@ static void draw_window(uint32_t *buf, window_t *w) {
 
 static void draw_start_menu(uint32_t *buf) {
   int m_w = 180;
-  int m_h = 200;
+  int m_h = 260;
   int m_x = 10;
   int m_y = vesa_height - 54 - m_h;
+  int item_padding = 12;
+  int item_spacing = 32;
 
-  wm_fill_rect(NULL, m_x, m_y, m_w, m_h, 0xDD202020);
+  gfx_fill_rect_to_buffer(buf, m_x, m_y, m_w, m_h, vesa_width, vesa_height, 0xDD202020);
 
-  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 1, "Notepad", 0xFFFFFFFF);
-  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 2, "Terminal", 0xFFFFFFFF);
-  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 3, "Calculator", 0xFFFFFFFF);
-  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 4, "Usage Mgr", 0xFFFFFFFF);
-  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 5, "About hzOS", 0xFFFFFFFF);
+  gfx_draw_string_to_buffer(buf, m_x + 10, m_y + item_padding + item_spacing * 0, vesa_width, vesa_height, "Notepad", 0xFFFFFFFF);
+  gfx_draw_string_to_buffer(buf, m_x + 10, m_y + item_padding + item_spacing * 1, vesa_width, vesa_height, "Terminal", 0xFFFFFFFF);
+  gfx_draw_string_to_buffer(buf, m_x + 10, m_y + item_padding + item_spacing * 2, vesa_width, vesa_height, "Calculator", 0xFFFFFFFF);
+  gfx_draw_string_to_buffer(buf, m_x + 10, m_y + item_padding + item_spacing * 3, vesa_width, vesa_height, "Usage Mgr", 0xFFFFFFFF);
+  gfx_draw_string_to_buffer(buf, m_x + 10, m_y + item_padding + item_spacing * 4, vesa_width, vesa_height, "About hzOS", 0xFFFFFFFF);
 
   /* Separator */
-  wm_fill_rect(NULL, m_x + 10, m_y + 15 + 32 * 6 - 8, m_w - 20, 1, 0xFF404040);
+  gfx_fill_rect_to_buffer(buf, m_x + 10, m_y + item_padding + item_spacing * 5 - 8, m_w - 20, 1, vesa_width, vesa_height, 0xFF404040);
 
-  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 6, "Restart", 0xFFFF5555);
-  wm_draw_string(NULL, m_x + 10, m_y + 15 + 32 * 7, "Shutdown", 0xFFFF5555);
+  gfx_draw_string_to_buffer(buf, m_x + 10, m_y + item_padding + item_spacing * 5, vesa_width, vesa_height, "Restart", 0xFFFF5555);
+  gfx_draw_string_to_buffer(buf, m_x + 10, m_y + item_padding + item_spacing * 6, vesa_width, vesa_height, "Shutdown", 0xFFFF5555);
 }
 
 static void draw_cursor(uint32_t *buf, int mx, int my) {
@@ -550,31 +552,33 @@ void wm_update() {
 
     if (start_menu_open) {
       int m_w = 180;
-      int m_h = 200;
+      int m_h = 260;
       int m_x = 10;
       int m_y = vesa_height - 54 - m_h;
+      int item_padding = 12;
+      int item_spacing = 32;
 
       if (mouse_x >= m_x && mouse_x < m_x + m_w && mouse_y >= m_y &&
           mouse_y < m_y + m_h) {
-        int rel_y = mouse_y - (m_y + 15);
-        int item_idx = rel_y / 32;
+        int rel_y = mouse_y - (m_y + item_padding);
+        int item_idx = rel_y / item_spacing;
 
-        if (item_idx == 1) {
+        if (item_idx == 0) {
           notepad_create();
-        } else if (item_idx == 2) {
+        } else if (item_idx == 1) {
           terminal_app_create();
-        } else if (item_idx == 3) {
+        } else if (item_idx == 2) {
           calculator_create();
-        } else if (item_idx == 4) {
+        } else if (item_idx == 3) {
           usagemgr_create();
-        } else if (item_idx == 5) {
+        } else if (item_idx == 4) {
           about_create();
-        } else if (item_idx == 6) {
+        } else if (item_idx == 5) {
           /* Restart */
           outb(0x64, 0xFE);
           asm volatile("hlt");
-        } else if (item_idx == 7) {
-          /* Shutdown (Adjusted for separator index) */
+        } else if (item_idx == 6) {
+          /* Shutdown */
           asm volatile("cli");
           outw(0x604, 0x2000); // QEMU
           while (1) asm volatile("hlt");
